@@ -28,10 +28,15 @@ func (l *Limiter) CheckProtocolRule(protocol string) (reject bool) {
 }
 
 func (l *Limiter) UpdateRule(rule *panel.Rules) error {
-	l.DomainRules = make([]*regexp.Regexp, len(rule.Regexp))
+	rules := make([]*regexp.Regexp, 0, len(rule.Regexp))
 	for i := range rule.Regexp {
-		l.DomainRules[i] = regexp.MustCompile(rule.Regexp[i])
+		r, err := regexp.Compile(rule.Regexp[i])
+		if err != nil {
+			continue
+		}
+		rules = append(rules, r)
 	}
+	l.DomainRules = rules
 	l.ProtocolRules = rule.Protocol
 	return nil
 }

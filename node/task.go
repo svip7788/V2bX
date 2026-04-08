@@ -40,16 +40,24 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 		}
 	}
 	if c.LimitConfig.EnableDynamicSpeedLimit {
+		if c.LimitConfig.DynamicSpeedLimitConfig == nil {
+			log.WithField("tag", c.tag).Warn("DynamicSpeedLimitConfig is nil, skip dynamic speed limit task")
+			return
+		}
 		c.traffic = make(map[string]int64)
 		c.dynamicSpeedLimitPeriodic = &task.Task{
 			Interval: time.Duration(c.LimitConfig.DynamicSpeedLimitConfig.Periodic) * time.Second,
 			Execute:  c.SpeedChecker,
 		}
 		log.Printf("[%s: %d] Start dynamic speed limit", c.apiClient.NodeType, c.apiClient.NodeId)
+		_ = c.dynamicSpeedLimitPeriodic.Start(false)
 	}
 }
 
 func (c *Controller) nodeInfoMonitor() (err error) {
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
+
 	// get node info
 	newN, err := c.apiClient.GetNodeInfo()
 	if err != nil {
@@ -74,8 +82,8 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": err,
-		}).Error("Get alive list failed")
-		return nil
+		}).Warn("Get alive list failed, keep old alive list")
+		newA = nil
 	}
 	if newN != nil {
 		c.info = newN
@@ -97,16 +105,20 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 
 		// Update limiter
 		if len(c.Options.Name) == 0 {
+			oldTag := c.tag
 			c.tag = c.buildNodeTag(newN)
-			// Remove Old limiter
-			limiter.DeleteLimiter(c.tag)
-			// Add new Limiter
-			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, newA)
+			limiter.DeleteLimiter(oldTag)
+			aliveList := newA
+			if aliveList == nil {
+				aliveList = c.aliveMap
+			}
+			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, aliveList)
 			c.limiter = l
 		}
 		// update alive list
 		if newA != nil {
-			c.limiter.AliveList = newA
+			c.limiter.SetAliveList(newA)
+			c.aliveMap = newA
 		}
 		// Update rule
 		err = c.limiter.UpdateRule(&newN.Rules)
@@ -153,15 +165,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		// Check interval
 		if c.nodeInfoMonitorPeriodic.Interval != newN.PullInterval &&
 			newN.PullInterval != 0 {
-			c.nodeInfoMonitorPeriodic.Interval = newN.PullInterval
-			c.nodeInfoMonitorPeriodic.Close()
-			_ = c.nodeInfoMonitorPeriodic.Start(false)
+			c.nodeInfoMonitorPeriodic.Restart(newN.PullInterval)
 		}
 		if c.userReportPeriodic.Interval != newN.PushInterval &&
 			newN.PushInterval != 0 {
-			c.userReportPeriodic.Interval = newN.PullInterval
-			c.userReportPeriodic.Close()
-			_ = c.userReportPeriodic.Start(false)
+			c.userReportPeriodic.Restart(newN.PushInterval)
 		}
 		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
 		// exit
@@ -169,17 +177,16 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	}
 	// update alive list
 	if newA != nil {
-		c.limiter.AliveList = newA
+		c.limiter.SetAliveList(newA)
+		c.aliveMap = newA
 	}
 	// node no changed, check users
-	if len(newU) == 0 {
+	if newU == nil {
 		return nil
 	}
 	deleted, added := compareUserList(c.userList, newU)
 	if len(deleted) > 0 {
-		// have deleted users
-		err = c.server.DelUsers(deleted, c.tag, c.info)
-		if err != nil {
+		if err = c.server.DelUsers(deleted, c.tag, c.info); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
@@ -188,13 +195,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 	}
 	if len(added) > 0 {
-		// have added users
-		_, err = c.server.AddUsers(&vCore.AddUsersParams{
+		if _, err = c.server.AddUsers(&vCore.AddUsersParams{
 			Tag:      c.tag,
 			NodeInfo: c.info,
 			Users:    added,
-		})
-		if err != nil {
+		}); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
@@ -203,16 +208,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 	}
 	if len(added) > 0 || len(deleted) > 0 {
-		// update Limiter
 		c.limiter.UpdateUser(c.tag, added, deleted)
-		if err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("limiter users failed")
-			return nil
-		}
-		// clear traffic record
 		if c.LimitConfig.EnableDynamicSpeedLimit {
 			for i := range deleted {
 				delete(c.traffic, deleted[i].Uuid)
@@ -228,12 +224,20 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 }
 
 func (c *Controller) SpeedChecker() error {
+	c.runtimeMu.Lock()
+	defer c.runtimeMu.Unlock()
+	if !c.LimitConfig.EnableDynamicSpeedLimit || c.LimitConfig.DynamicSpeedLimitConfig == nil {
+		return nil
+	}
+
 	for u, t := range c.traffic {
 		if t >= c.LimitConfig.DynamicSpeedLimitConfig.Traffic {
 			err := c.limiter.UpdateDynamicSpeedLimit(c.tag, u,
 				c.LimitConfig.DynamicSpeedLimitConfig.SpeedLimit,
 				time.Now().Add(time.Duration(c.LimitConfig.DynamicSpeedLimitConfig.ExpireTime)*time.Minute))
-			log.WithField("err", err).Error("Update dynamic speed limit failed")
+			if err != nil {
+				log.WithField("err", err).Error("Update dynamic speed limit failed")
+			}
 			delete(c.traffic, u)
 		}
 	}

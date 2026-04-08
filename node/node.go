@@ -6,6 +6,7 @@ import (
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/conf"
 	vCore "github.com/InazumaV/V2bX/core"
+	log "github.com/sirupsen/logrus"
 )
 
 type Node struct {
@@ -21,12 +22,13 @@ func (n *Node) Start(nodes []conf.NodeConfig, core vCore.Core) error {
 	for i := range nodes {
 		p, err := panel.New(&nodes[i].ApiConfig)
 		if err != nil {
+			n.Close()
 			return err
 		}
-		// Register controller service
 		n.controllers[i] = NewController(core, p, &nodes[i].Options)
 		err = n.controllers[i].Start()
 		if err != nil {
+			n.Close()
 			return fmt.Errorf("start node controller [%s-%s-%d] error: %s",
 				nodes[i].ApiConfig.APIHost,
 				nodes[i].ApiConfig.NodeType,
@@ -39,9 +41,11 @@ func (n *Node) Start(nodes []conf.NodeConfig, core vCore.Core) error {
 
 func (n *Node) Close() {
 	for _, c := range n.controllers {
-		err := c.Close()
-		if err != nil {
-			panic(err)
+		if c == nil {
+			continue
+		}
+		if err := c.Close(); err != nil {
+			log.WithField("err", err).Error("Close controller failed")
 		}
 	}
 	n.controllers = nil

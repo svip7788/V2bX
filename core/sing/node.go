@@ -91,7 +91,10 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options) (optio
 		tls.Enabled = true
 		v := info.VAllss
 		tls.ServerName = v.TlsSettings.ServerName
-		port, _ := strconv.Atoi(v.TlsSettings.ServerPort)
+		port, err := strconv.Atoi(v.TlsSettings.ServerPort)
+		if err != nil {
+			return option.Inbound{}, fmt.Errorf("parse reality server port error: %s", err)
+		}
 		var dest string
 		if v.TlsSettings.Dest != "" {
 			dest = v.TlsSettings.Dest
@@ -140,9 +143,11 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options) (optio
 						if err != nil {
 							return option.Inbound{}, fmt.Errorf("decode HttpRequest error: %s", err)
 						}
-						t.HTTPOptions.Host = request.Headers.Host
+					t.HTTPOptions.Host = request.Headers.Host
+					if len(request.Path) > 0 {
 						t.HTTPOptions.Path = request.Path[0]
-						t.HTTPOptions.Method = request.Method
+					}
+					t.HTTPOptions.Method = request.Method
 					}
 				} else {
 					t.Type = ""
@@ -422,5 +427,7 @@ func (b *Sing) DelNode(tag string) error {
 	if err != nil {
 		return fmt.Errorf("delete inbound error: %s", err)
 	}
+	b.hookServer.counter.Delete(tag)
+	delete(b.nodeReportMinTrafficBytes, tag)
 	return nil
 }

@@ -259,10 +259,10 @@ func buildTrojan(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCo
 		s, err := json.Marshal(&coreConf.TrojanServerConfig{
 			Fallbacks: fallbackConfigs,
 		})
-		inbound.Settings = (*json.RawMessage)(&s)
 		if err != nil {
 			return fmt.Errorf("marshal trojan fallback config error: %s", err)
 		}
+		inbound.Settings = (*json.RawMessage)(&s)
 	} else {
 		s := []byte("{}")
 		inbound.Settings = (*json.RawMessage)(&s)
@@ -326,10 +326,10 @@ func buildShadowsocks(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *c
 	t := coreConf.TransportProtocol("tcp")
 	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
 	sets, err := json.Marshal(settings)
-	inbound.Settings = (*json.RawMessage)(&sets)
 	if err != nil {
 		return fmt.Errorf("marshal shadowsocks settings error: %s", err)
 	}
+	inbound.Settings = (*json.RawMessage)(&sets)
 	return nil
 }
 

@@ -56,8 +56,8 @@ wget -N https://raw.githubusercontent.com/wyx2685/V2bX-script/master/install.sh 
 
 ## 构建
 ``` bash
-# 通过-tags选项指定要编译的内核， 可选 xray， sing, hysteria2
-GOEXPERIMENT=jsonv2 go build -v -o build_assets/V2bX -tags "sing xray hysteria2 with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid="
+# 通过-tags选项指定要编译的内核， 可选 xray， sing
+GOEXPERIMENT=jsonv2 go build -v -o build_assets/V2bX -tags "sing xray with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid="
 ```
 
 ## 配置文件及详细使用教程

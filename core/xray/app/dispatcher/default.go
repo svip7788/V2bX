@@ -34,11 +34,24 @@ import (
 )
 
 var errSniffingTimeout = errors.New("timeout on sniffing")
+var excludeDomainRegexCache sync.Map
 
 type cachedReader struct {
 	sync.Mutex
 	reader buf.TimeoutReader
 	cache  buf.MultiBuffer
+}
+
+func getExcludeDomainRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := excludeDomainRegexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := excludeDomainRegexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
 }
 
 func (r *cachedReader) Cache(b *buf.Buffer, deadline time.Duration) error {
@@ -194,15 +207,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 			common.Interrupt(inboundLink.Reader)
 			return nil, nil, nil, errors.New("Limited ", user.Email, " by conn or ip")
 		}
-		var lm *LinkManager
-		if lmloaded, ok := d.LinkManagers.Load(user.Email); !ok {
-			lm = &LinkManager{
-				links: make(map[*ManagedWriter]buf.Reader),
-			}
-			d.LinkManagers.Store(user.Email, lm)
-		} else {
-			lm = lmloaded.(*LinkManager)
-		}
+		lm := d.getOrCreateLinkManager(user.Email)
 		managedWriter := &ManagedWriter{
 			writer:  uplinkWriter,
 			manager: lm,
@@ -214,13 +219,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 			inboundLink.Writer = rate.NewRateLimitWriter(inboundLink.Writer, w)
 			outboundLink.Writer = rate.NewRateLimitWriter(outboundLink.Writer, w)
 		}
-		var t *counter.TrafficCounter
-		if c, ok := d.Counter.Load(sessionInbound.Tag); !ok {
-			t = counter.NewTrafficCounter()
-			d.Counter.Store(sessionInbound.Tag, t)
-		} else {
-			t = c.(*counter.TrafficCounter)
-		}
+		t := d.getOrCreateCounter(sessionInbound.Tag)
 
 		ts := t.GetCounter(user.Email)
 		upcounter := &counter.XrayTrafficCounter{V: &ts.UpCounter}
@@ -246,7 +245,7 @@ func (d *DefaultDispatcher) shouldOverride(ctx context.Context, result SniffResu
 	for _, d := range request.ExcludeForDomain {
 		if strings.HasPrefix(d, "regexp:") {
 			pattern := d[7:]
-			re, err := regexp.Compile(pattern)
+			re, err := getExcludeDomainRegex(pattern)
 			if err != nil {
 				errors.LogInfo(ctx, "Unable to compile regex")
 				continue
@@ -388,15 +387,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			common.Interrupt(outbound.Reader)
 			return errors.New("Limited ", user.Email, " by conn or ip")
 		}
-		var lm *LinkManager
-		if lmloaded, ok := d.LinkManagers.Load(user.Email); !ok {
-			lm = &LinkManager{
-				links: make(map[*ManagedWriter]buf.Reader),
-			}
-			d.LinkManagers.Store(user.Email, lm)
-		} else {
-			lm = lmloaded.(*LinkManager)
-		}
+		lm := d.getOrCreateLinkManager(user.Email)
 		managedWriter := &ManagedWriter{
 			writer:  outbound.Writer,
 			manager: lm,
@@ -406,13 +397,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			sessionInbound.CanSpliceCopy = 3
 			outbound.Writer = rate.NewRateLimitWriter(outbound.Writer, w)
 		}
-		var t *counter.TrafficCounter
-		if c, ok := d.Counter.Load(sessionInbound.Tag); !ok {
-			t = counter.NewTrafficCounter()
-			d.Counter.Store(sessionInbound.Tag, t)
-		} else {
-			t = c.(*counter.TrafficCounter)
-		}
+		t := d.getOrCreateCounter(sessionInbound.Tag)
 
 		ts := t.GetCounter(user.Email)
 		downcounter := &counter.XrayTrafficCounter{V: &ts.DownCounter}
@@ -629,4 +614,28 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	}
 
 	handler.Dispatch(ctx, link)
+}
+
+func (d *DefaultDispatcher) getOrCreateCounter(tag string) *counter.TrafficCounter {
+	if c, ok := d.Counter.Load(tag); ok {
+		return c.(*counter.TrafficCounter)
+	}
+	c, _ := d.Counter.LoadOrStore(tag, counter.NewTrafficCounter())
+	return c.(*counter.TrafficCounter)
+}
+
+func (d *DefaultDispatcher) getOrCreateLinkManager(email string) *LinkManager {
+	if v, ok := d.LinkManagers.Load(email); ok {
+		lm := v.(*LinkManager)
+		lm.markOwner(email, &d.LinkManagers)
+		return lm
+	}
+	v, _ := d.LinkManagers.LoadOrStore(email, &LinkManager{
+		links: make(map[*ManagedWriter]buf.Reader),
+		key:   email,
+		owner: &d.LinkManagers,
+	})
+	lm := v.(*LinkManager)
+	lm.markOwner(email, &d.LinkManagers)
+	return lm
 }

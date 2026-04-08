@@ -58,8 +58,10 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		f, err := os.OpenFile(c.LogConfig.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
 			log.WithField("err", err).Error("Open log file failed, using stdout instead")
+		} else {
+			defer f.Close()
+			log.SetOutput(f)
 		}
-		log.SetOutput(f)
 	}
 	limiter.Init()
 	log.Info("Start V2bX...")

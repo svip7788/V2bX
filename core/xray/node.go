@@ -6,6 +6,7 @@ import (
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/conf"
+	"github.com/InazumaV/V2bX/core/xray/app/dispatcher"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/inbound"
 	"github.com/xtls/xray-core/features/outbound"
@@ -63,7 +64,7 @@ func (c *Xray) addOutbound(config *core.OutboundHandlerConfig) error {
 	}
 	handler, ok := rawHandler.(outbound.Handler)
 	if !ok {
-		return fmt.Errorf("not an InboundHandler: %s", err)
+		return fmt.Errorf("not an OutboundHandler: %s", err)
 	}
 	if err := c.ohm.AddHandler(context.Background(), handler); err != nil {
 		return err
@@ -77,6 +78,24 @@ func (c *Xray) DelNode(tag string) error {
 		return fmt.Errorf("remove in error: %s", err)
 	}
 	err = c.removeOutbound(tag)
+	c.dispatcher.Counter.Delete(tag)
+	prefix := tag + "|"
+	c.dispatcher.LinkManagers.Range(func(key, value interface{}) bool {
+		if email, ok := key.(string); ok && len(email) > len(prefix) && email[:len(prefix)] == prefix {
+			lm := value.(*dispatcher.LinkManager)
+			lm.CloseAll()
+			c.dispatcher.LinkManagers.Delete(key)
+		}
+		return true
+	})
+	c.users.mapLock.Lock()
+	for k := range c.users.uidMap {
+		if len(k) > len(prefix) && k[:len(prefix)] == prefix {
+			delete(c.users.uidMap, k)
+		}
+	}
+	c.users.mapLock.Unlock()
+	delete(c.nodeReportMinTrafficBytes, tag)
 	if err != nil {
 		return fmt.Errorf("remove out error: %s", err)
 	}

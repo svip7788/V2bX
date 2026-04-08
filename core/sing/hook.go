@@ -2,7 +2,6 @@ package sing
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"sync"
 
@@ -30,7 +29,8 @@ func (h *HookServer) ModeList() []string {
 func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
-		log.Warn("get limiter for ", m.Inbound, " error: ", err)
+		log.Error("get limiter for ", m.Inbound, " error: ", err)
+		conn.Close()
 		return conn
 	}
 	taguuid := format.UserTag(m.Inbound, m.User)
@@ -42,83 +42,56 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	} else if b != nil {
 		conn = rate.NewConnRateLimiter(conn, b)
 	}
-	if l != nil {
-		destStr := m.Destination.AddrString()
-		protocol := m.Protocol
-		if l.CheckDomainRule(destStr) {
-			log.Error(fmt.Sprintf(
-				"User %s access domain %s reject by rule",
-				m.User,
-				destStr))
-			conn.Close()
-			return conn
-		}
-		if len(protocol) != 0 {
-			if l.CheckProtocolRule(protocol) {
-				log.Error(fmt.Sprintf(
-					"User %s access protocol %s reject by rule",
-					m.User,
-					protocol))
-				conn.Close()
-				return conn
-			}
-		}
+	destStr := m.Destination.AddrString()
+	if l.CheckDomainRule(destStr) {
+		log.Error("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
+		conn.Close()
+		return conn
 	}
-	var t *counter.TrafficCounter
-	if c, ok := h.counter.Load(m.Inbound); !ok {
-		t = counter.NewTrafficCounter()
-		h.counter.Store(m.Inbound, t)
-	} else {
-		t = c.(*counter.TrafficCounter)
+	if protocol := m.Protocol; len(protocol) != 0 && l.CheckProtocolRule(protocol) {
+		log.Error("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
+		conn.Close()
+		return conn
 	}
+	t := h.getCounter(m.Inbound)
 	conn = counter.NewConnCounter(conn, t.GetCounter(m.User))
 	return conn
+}
+
+func (h *HookServer) getCounter(tag string) *counter.TrafficCounter {
+	if c, ok := h.counter.Load(tag); ok {
+		return c.(*counter.TrafficCounter)
+	}
+	c, _ := h.counter.LoadOrStore(tag, counter.NewTrafficCounter())
+	return c.(*counter.TrafficCounter)
 }
 
 func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
-		log.Warn("get limiter for ", m.Inbound, " error: ", err)
+		log.Error("get limiter for ", m.Inbound, " error: ", err)
+		conn.Close()
 		return conn
 	}
 	ip := m.Source.Addr.String()
 	taguuid := format.UserTag(m.Inbound, m.User)
-	if b, r := l.CheckLimit(taguuid, ip, false, false); r {
+	if _, r := l.CheckLimit(taguuid, ip, false, false); r {
 		conn.Close()
 		log.Error("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
 		return conn
-	} else if b != nil {
-		//conn = rate.NewPacketConnCounter(conn, b)
 	}
-	if l != nil {
-		destStr := m.Destination.AddrString()
-		protocol := m.Destination.Network()
-		if l.CheckDomainRule(destStr) {
-			log.Error(fmt.Sprintf(
-				"User %s access domain %s reject by rule",
-				m.User,
-				destStr))
-			conn.Close()
-			return conn
-		}
-		if len(protocol) != 0 {
-			if l.CheckProtocolRule(protocol) {
-				log.Error(fmt.Sprintf(
-					"User %s access protocol %s reject by rule",
-					m.User,
-					protocol))
-				conn.Close()
-				return conn
-			}
-		}
+	destStr := m.Destination.AddrString()
+	if l.CheckDomainRule(destStr) {
+		log.Error("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
+		conn.Close()
+		return conn
 	}
-	var t *counter.TrafficCounter
-	if c, ok := h.counter.Load(m.Inbound); !ok {
-		t = counter.NewTrafficCounter()
-		h.counter.Store(m.Inbound, t)
-	} else {
-		t = c.(*counter.TrafficCounter)
+	if protocol := m.Destination.Network(); len(protocol) != 0 && l.CheckProtocolRule(protocol) {
+		log.Error("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
+		conn.Close()
+		return conn
 	}
+	t := h.getCounter(m.Inbound)
 	conn = counter.NewPacketConnCounter(conn, t.GetCounter(m.User))
 	return conn
 }

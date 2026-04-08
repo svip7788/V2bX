@@ -3,6 +3,7 @@ package node
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/task"
@@ -26,6 +27,7 @@ type Controller struct {
 	renewCertPeriodic         *task.Task
 	dynamicSpeedLimitPeriodic *task.Task
 	onlineIpReportPeriodic    *task.Task
+	runtimeMu                 sync.Mutex
 	*conf.Options
 }
 
@@ -57,7 +59,10 @@ func (c *Controller) Start() error {
 	}
 	c.aliveMap, err = c.apiClient.GetUserAlive()
 	if err != nil {
-		return fmt.Errorf("failed to get user alive list: %s", err)
+		log.WithFields(log.Fields{
+			"err": err,
+		}).Warn("Get user alive list failed, fallback to empty alive list")
+		c.aliveMap = make(map[int]int)
 	}
 	if len(c.Options.Name) == 0 {
 		c.tag = c.buildNodeTag(node)

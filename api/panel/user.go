@@ -97,18 +97,20 @@ func (c *Client) GetUserAlive() (map[int]int, error) {
 	r, err := c.client.R().
 		ForceContentType("application/json").
 		Get(path)
-	if err != nil || r.StatusCode() >= 399 {
-		c.AliveMap.Alive = make(map[int]int)
-		return c.AliveMap.Alive, nil
+	if err != nil {
+		return nil, fmt.Errorf("request user alive list error: %w", err)
 	}
 	if r == nil || r.RawResponse == nil {
-		fmt.Printf("received nil response or raw response")
-		c.AliveMap.Alive = make(map[int]int)
-		return c.AliveMap.Alive, nil
+		return nil, fmt.Errorf("received nil response or raw response")
+	}
+	if r.StatusCode() >= 399 {
+		return nil, fmt.Errorf("request user alive list failed: status code %d", r.StatusCode())
 	}
 	defer r.RawResponse.Body.Close()
 	if err := json.Unmarshal(r.Body(), c.AliveMap); err != nil {
-		fmt.Printf("unmarshal user alive list error: %s", err)
+		return nil, fmt.Errorf("unmarshal user alive list error: %w", err)
+	}
+	if c.AliveMap.Alive == nil {
 		c.AliveMap.Alive = make(map[int]int)
 	}
 
@@ -146,10 +148,8 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 		ForceContentType("application/json").
 		Post(path)
 	err = c.checkResponse(r, path, err)
-
 	if err != nil {
-		return nil
+		return err
 	}
-
 	return nil
 }

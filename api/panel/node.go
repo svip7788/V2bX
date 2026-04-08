@@ -267,16 +267,19 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 	// parse rules and dns
 	for i := range cm.Routes {
 		var matchs []string
-		if _, ok := cm.Routes[i].Match.(string); ok {
-			matchs = strings.Split(cm.Routes[i].Match.(string), ",")
-		} else if _, ok = cm.Routes[i].Match.([]string); ok {
-			matchs = cm.Routes[i].Match.([]string)
-		} else {
-			temp := cm.Routes[i].Match.([]interface{})
+		if s, ok := cm.Routes[i].Match.(string); ok {
+			matchs = strings.Split(s, ",")
+		} else if sl, ok := cm.Routes[i].Match.([]string); ok {
+			matchs = sl
+		} else if temp, ok := cm.Routes[i].Match.([]interface{}); ok {
 			matchs = make([]string, len(temp))
-			for i := range temp {
-				matchs[i] = temp[i].(string)
+			for j := range temp {
+				if s, ok := temp[j].(string); ok {
+					matchs[j] = s
+				}
 			}
+		} else {
+			continue
 		}
 		switch cm.Routes[i].Action {
 		case "block":
@@ -290,6 +293,9 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 				}
 			}
 		case "dns":
+			if len(matchs) == 0 {
+				continue
+			}
 			var domains []string
 			domains = append(domains, matchs...)
 			if matchs[0] != "main" {
@@ -317,15 +323,25 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 }
 
 func intervalToTime(i interface{}) time.Duration {
-	switch reflect.TypeOf(i).Kind() {
-	case reflect.Int:
-		return time.Duration(i.(int)) * time.Second
-	case reflect.String:
-		i, _ := strconv.Atoi(i.(string))
-		return time.Duration(i) * time.Second
-	case reflect.Float64:
-		return time.Duration(i.(float64)) * time.Second
+	if i == nil {
+		return 0
+	}
+	switch v := i.(type) {
+	case int:
+		return time.Duration(v) * time.Second
+	case float64:
+		return time.Duration(v) * time.Second
+	case string:
+		n, _ := strconv.Atoi(v)
+		return time.Duration(n) * time.Second
 	default:
-		return time.Duration(reflect.ValueOf(i).Int()) * time.Second
+		rv := reflect.ValueOf(i)
+		if rv.CanInt() {
+			return time.Duration(rv.Int()) * time.Second
+		}
+		if rv.CanFloat() {
+			return time.Duration(rv.Float()) * time.Second
+		}
+		return 0
 	}
 }

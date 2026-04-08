@@ -3,6 +3,7 @@ package sing
 import (
 	"encoding/base64"
 	"errors"
+	"fmt"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/counter"
@@ -22,11 +23,6 @@ func (b *Sing) AddUsers(p *core.AddUsersParams) (added int, err error) {
 	in, found := b.box.Inbound().Get(p.Tag)
 	if !found {
 		return 0, errors.New("the inbound not found")
-	}
-	b.users.mapLock.Lock()
-	defer b.users.mapLock.Unlock()
-	for i := range p.Users {
-		b.users.uidMap[p.Users[i].Uuid] = p.Users[i].Id
 	}
 	switch p.NodeInfo.Type {
 	case "vless":
@@ -54,9 +50,13 @@ func (b *Sing) AddUsers(p *core.AddUsersParams) (added int, err error) {
 			var password = p.Users[i].Uuid
 			switch p.Shadowsocks.Cipher {
 			case "2022-blake3-aes-128-gcm":
-				password = base64.StdEncoding.EncodeToString([]byte(password[:16]))
+				if len(password) >= 16 {
+					password = base64.StdEncoding.EncodeToString([]byte(password[:16]))
+				}
 			case "2022-blake3-aes-256-gcm":
-				password = base64.StdEncoding.EncodeToString([]byte(password[:32]))
+				if len(password) >= 32 {
+					password = base64.StdEncoding.EncodeToString([]byte(password[:32]))
+				}
 			}
 			us[i] = option.ShadowsocksUser{
 				Name:     p.Users[i].Uuid,
@@ -114,11 +114,18 @@ func (b *Sing) AddUsers(p *core.AddUsersParams) (added int, err error) {
 			}
 		}
 		err = in.(*anytls.Inbound).AddUsers(us)
+	default:
+		return 0, fmt.Errorf("unsupported node type: %s", p.NodeInfo.Type)
 	}
 	if err != nil {
 		return 0, err
 	}
-	return len(p.Users), err
+	b.users.mapLock.Lock()
+	for i := range p.Users {
+		b.users.uidMap[p.Users[i].Uuid] = p.Users[i].Id
+	}
+	b.users.mapLock.Unlock()
+	return len(p.Users), nil
 }
 
 func (b *Sing) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int64) {
@@ -135,40 +142,71 @@ func (b *Sing) GetUserTraffic(tag, uuid string, reset bool) (up int64, down int6
 }
 
 func (b *Sing) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic, error) {
-	trafficSlice := make([]panel.UserTraffic, 0)
+	var trafficSlice []panel.UserTraffic
 	hook := b.hookServer
 	b.users.mapLock.RLock()
 	defer b.users.mapLock.RUnlock()
 	if v, ok := hook.counter.Load(tag); ok {
 		c := v.(*counter.TrafficCounter)
+		minBytes := b.nodeReportMinTrafficBytes[tag]
 		c.Counters.Range(func(key, value interface{}) bool {
 			uuid := key.(string)
 			traffic := value.(*counter.TrafficStorage)
 			up := traffic.UpCounter.Load()
 			down := traffic.DownCounter.Load()
-			if up+down > b.nodeReportMinTrafficBytes[tag] {
+			if up == 0 && down == 0 {
+				return true
+			}
+			uid := b.users.uidMap[uuid]
+			if uid == 0 {
+				c.Delete(uuid)
+				return true
+			}
+			if up+down > minBytes {
 				if reset {
-					traffic.UpCounter.Store(0)
-					traffic.DownCounter.Store(0)
-				}
-				if b.users.uidMap[uuid] == 0 {
-					c.Delete(uuid)
-					return true
+					traffic.UpCounter.Add(-up)
+					traffic.DownCounter.Add(-down)
 				}
 				trafficSlice = append(trafficSlice, panel.UserTraffic{
-					UID:      b.users.uidMap[uuid],
+					UID:      uid,
 					Upload:   up,
 					Download: down,
 				})
 			}
 			return true
 		})
-		if len(trafficSlice) == 0 {
-			return nil, nil
-		}
-		return trafficSlice, nil
 	}
-	return nil, nil
+	if len(trafficSlice) == 0 {
+		return nil, nil
+	}
+	return trafficSlice, nil
+}
+
+func (b *Sing) RestoreUserTraffic(tag string, trafficSlice []panel.UserTraffic) error {
+	if len(trafficSlice) == 0 {
+		return nil
+	}
+	v, ok := b.hookServer.counter.Load(tag)
+	if !ok {
+		return nil
+	}
+	c := v.(*counter.TrafficCounter)
+	b.users.mapLock.RLock()
+	uidToUUID := make(map[int]string, len(b.users.uidMap))
+	for uuid, uid := range b.users.uidMap {
+		uidToUUID[uid] = uuid
+	}
+	b.users.mapLock.RUnlock()
+	for i := range trafficSlice {
+		uuid, found := uidToUUID[trafficSlice[i].UID]
+		if !found {
+			continue
+		}
+		storage := c.GetCounter(uuid)
+		storage.UpCounter.Add(trafficSlice[i].Upload)
+		storage.DownCounter.Add(trafficSlice[i].Download)
+	}
+	return nil
 }
 
 type UserDeleter interface {
@@ -195,24 +233,31 @@ func (b *Sing) DelUsers(users []panel.UserInfo, tag string, info *panel.NodeInfo
 			del = i.(*hysteria2.Inbound)
 		case "anytls":
 			del = i.(*anytls.Inbound)
+		default:
+			return fmt.Errorf("unsupported node type: %s", info.Type)
 		}
 	} else {
 		return errors.New("the inbound not found")
 	}
 	uuids := make([]string, len(users))
-	b.users.mapLock.Lock()
-	defer b.users.mapLock.Unlock()
 	for i := range users {
-		if v, ok := b.hookServer.counter.Load(tag); ok {
-			c := v.(*counter.TrafficCounter)
-			c.Delete(users[i].Uuid)
-		}
-		delete(b.users.uidMap, users[i].Uuid)
 		uuids[i] = users[i].Uuid
 	}
 	err := del.DelUsers(uuids)
 	if err != nil {
 		return err
+	}
+	b.users.mapLock.Lock()
+	defer b.users.mapLock.Unlock()
+	var tc *counter.TrafficCounter
+	if v, ok := b.hookServer.counter.Load(tag); ok {
+		tc = v.(*counter.TrafficCounter)
+	}
+	for i := range users {
+		if tc != nil {
+			tc.Delete(users[i].Uuid)
+		}
+		delete(b.users.uidMap, users[i].Uuid)
 	}
 	return nil
 }

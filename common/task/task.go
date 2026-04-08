@@ -11,6 +11,13 @@ type Task struct {
 	access   sync.Mutex
 	running  bool
 	stop     chan struct{}
+	execMu   sync.Mutex
+}
+
+func (t *Task) runExecute() error {
+	t.execMu.Lock()
+	defer t.execMu.Unlock()
+	return t.Execute()
 }
 
 func (t *Task) Start(first bool) error {
@@ -25,27 +32,23 @@ func (t *Task) Start(first bool) error {
 
 	go func() {
 		if first {
-			if err := t.Execute(); err != nil {
-				t.access.Lock()
-				t.running = false
-				close(t.stop)
-				t.access.Unlock()
+			if err := t.runExecute(); err != nil {
+				t.close()
 				return
 			}
 		}
 
+		ticker := time.NewTicker(t.Interval)
+		defer ticker.Stop()
 		for {
 			select {
-			case <-time.After(t.Interval):
+			case <-ticker.C:
 			case <-t.stop:
 				return
 			}
 
-			if err := t.Execute(); err != nil {
-				t.access.Lock()
-				t.running = false
-				close(t.stop)
-				t.access.Unlock()
+			if err := t.runExecute(); err != nil {
+				t.close()
 				return
 			}
 		}
@@ -54,11 +57,21 @@ func (t *Task) Start(first bool) error {
 	return nil
 }
 
-func (t *Task) Close() {
+func (t *Task) close() {
 	t.access.Lock()
 	if t.running {
 		t.running = false
 		close(t.stop)
 	}
 	t.access.Unlock()
+}
+
+func (t *Task) Close() {
+	t.close()
+}
+
+func (t *Task) Restart(interval time.Duration) {
+	t.close()
+	t.Interval = interval
+	_ = t.Start(false)
 }
