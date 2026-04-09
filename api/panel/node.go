@@ -27,6 +27,7 @@ type NodeInfo struct {
 	PullInterval time.Duration
 	RawDNS       RawDNS
 	Rules        Rules
+	CertConfig   *PanelCertConfig
 
 	// origin
 	VAllss      *VAllssNode
@@ -39,12 +40,23 @@ type NodeInfo struct {
 	Common      *CommonNode
 }
 
+type PanelCertConfig struct {
+	CertMode         string `json:"cert_mode"`
+	CertFile         string `json:"cert_file"`
+	KeyFile          string `json:"key_file"`
+	CertDomain       string `json:"cert_domain"`
+	Provider         string `json:"provider"`
+	Email            string `json:"email"`
+	RejectUnknownSni bool   `json:"reject_unknown_sni"`
+}
+
 type CommonNode struct {
-	Host       string      `json:"host"`
-	ServerPort int         `json:"server_port"`
-	ServerName string      `json:"server_name"`
-	Routes     []Route     `json:"routes"`
-	BaseConfig *BaseConfig `json:"base_config"`
+	Host       string           `json:"host"`
+	ServerPort int              `json:"server_port"`
+	ServerName string           `json:"server_name"`
+	Routes     []Route          `json:"routes"`
+	BaseConfig *BaseConfig      `json:"base_config"`
+	CertConfig *PanelCertConfig `json:"cert_config"`
 }
 
 type Route struct {
@@ -102,12 +114,17 @@ type RealityConfig struct {
 
 type ShadowsocksNode struct {
 	CommonNode
-	Cipher    string `json:"cipher"`
-	ServerKey string `json:"server_key"`
+	Cipher          string          `json:"cipher"`
+	ServerKey       string          `json:"server_key"`
+	Plugin          string          `json:"plugin"`
+	PluginOpts      string          `json:"plugin_opts"`
+	NetworkSettings json.RawMessage `json:"networkSettings"`
 }
 
 type TrojanNode struct {
 	CommonNode
+	Tls             int             `json:"tls"`
+	TlsSettings     TlsSettings     `json:"tls_settings"`
 	Network         string          `json:"network"`
 	NetworkSettings json.RawMessage `json:"networkSettings"`
 }
@@ -120,7 +137,9 @@ type TuicNode struct {
 
 type AnyTlsNode struct {
 	CommonNode
-	PaddingScheme []string `json:"padding_scheme,omitempty"`
+	Network         string          `json:"network"`
+	NetworkSettings json.RawMessage `json:"networkSettings"`
+	PaddingScheme   []string        `json:"padding_scheme,omitempty"`
 }
 
 type HysteriaNode struct {
@@ -225,7 +244,10 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 		}
 		cm = &rsp.CommonNode
 		node.Trojan = rsp
-		node.Security = Tls
+		node.Security = rsp.Tls
+		if node.Security == 0 {
+			node.Security = Tls
+		}
 	case "tuic":
 		rsp := &TuicNode{}
 		err = json.Unmarshal(r.Body(), rsp)
@@ -313,6 +335,10 @@ func (c *Client) GetNodeInfo() (node *NodeInfo, err error) {
 	// set interval
 	node.PushInterval = intervalToTime(cm.BaseConfig.PushInterval)
 	node.PullInterval = intervalToTime(cm.BaseConfig.PullInterval)
+
+	if cm.CertConfig != nil && cm.CertConfig.CertMode != "" && cm.CertConfig.CertMode != "none" {
+		node.CertConfig = cm.CertConfig
+	}
 
 	node.Common = cm
 	// clear

@@ -2,6 +2,7 @@ package xray
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"sync"
 
@@ -90,6 +91,10 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 			}
 		}
 		os.Setenv("XRAY_DNS_PATH", c.DnsConfigPath)
+	}
+	if coreDnsConfig.QueryStrategy == "" && !hasPublicIPv6() {
+		coreDnsConfig.QueryStrategy = "UseIPv4"
+		log.Info("No public IPv6 detected, DNS QueryStrategy set to UseIPv4")
 	}
 	dnsConfig, err := coreDnsConfig.Build()
 	if err != nil {
@@ -212,9 +217,31 @@ func (c *Xray) Protocols() []string {
 		"vless",
 		"shadowsocks",
 		"trojan",
+		"hysteria",
+		"hysteria2",
+		"tuic",
+		"anytls",
 	}
 }
 
 func (c *Xray) Type() string {
 	return "xray"
+}
+
+func hasPublicIPv6() bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return false
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP
+		if ip.To4() == nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsPrivate() {
+			return true
+		}
+	}
+	return false
 }

@@ -89,25 +89,33 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options) (optio
 		}
 	case panel.Reality:
 		tls.Enabled = true
-		v := info.VAllss
-		tls.ServerName = v.TlsSettings.ServerName
-		port, err := strconv.Atoi(v.TlsSettings.ServerPort)
+		var tlsSettings panel.TlsSettings
+		var realityConfig panel.RealityConfig
+		switch info.Type {
+		case "vmess", "vless":
+			tlsSettings = info.VAllss.TlsSettings
+			realityConfig = info.VAllss.RealityConfig
+		case "trojan":
+			tlsSettings = info.Trojan.TlsSettings
+		}
+		tls.ServerName = tlsSettings.ServerName
+		port, err := strconv.Atoi(tlsSettings.ServerPort)
 		if err != nil {
 			return option.Inbound{}, fmt.Errorf("parse reality server port error: %s", err)
 		}
 		var dest string
-		if v.TlsSettings.Dest != "" {
-			dest = v.TlsSettings.Dest
+		if tlsSettings.Dest != "" {
+			dest = tlsSettings.Dest
 		} else {
 			dest = tls.ServerName
 		}
 
-		mtd, _ := time.ParseDuration(v.RealityConfig.MaxTimeDiff)
+		mtd, _ := time.ParseDuration(realityConfig.MaxTimeDiff)
 		tls.Reality = &option.InboundRealityOptions{
 			Enabled:    true,
-			ShortID:    []string{v.TlsSettings.ShortId},
-			PrivateKey: v.TlsSettings.PrivateKey,
-			Xver:       uint8(v.TlsSettings.Xver),
+			ShortID:    []string{tlsSettings.ShortId},
+			PrivateKey: tlsSettings.PrivateKey,
+			Xver:       uint8(tlsSettings.Xver),
 			Handshake: option.InboundRealityHandshakeOptions{
 				ServerOptions: option.ServerOptions{
 					Server:     dest,
@@ -143,11 +151,11 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options) (optio
 						if err != nil {
 							return option.Inbound{}, fmt.Errorf("decode HttpRequest error: %s", err)
 						}
-					t.HTTPOptions.Host = request.Headers.Host
-					if len(request.Path) > 0 {
-						t.HTTPOptions.Path = request.Path[0]
-					}
-					t.HTTPOptions.Method = request.Method
+						t.HTTPOptions.Host = request.Headers.Host
+						if len(request.Path) > 0 {
+							t.HTTPOptions.Path = request.Path[0]
+						}
+						t.HTTPOptions.Method = request.Method
 					}
 				} else {
 					t.Type = ""

@@ -11,17 +11,16 @@ func (l *Limiter) AddDynamicSpeedLimit(tag string, userInfo *panel.UserInfo, lim
 	key := format.UserTag(tag, userInfo.Uuid)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if v, ok := l.UserLimitInfo.Load(key); ok {
-		oldInfo := v.(*UserLimitInfo)
-		info := *oldInfo
+	if old, ok := l.userLimitInfo[key]; ok {
+		info := *old
 		info.DynamicSpeedLimit = limitNum
 		info.ExpireTime = time.Now().Add(time.Duration(expire) * time.Second).Unix()
-		l.UserLimitInfo.Store(key, &info)
+		l.userLimitInfo[key] = &info
 	} else {
-		l.UserLimitInfo.Store(key, &UserLimitInfo{
+		l.userLimitInfo[key] = &UserLimitInfo{
 			DynamicSpeedLimit: limitNum,
 			ExpireTime:        time.Now().Add(time.Duration(expire) * time.Second).Unix(),
-		})
+		}
 	}
 	return nil
 }

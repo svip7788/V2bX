@@ -131,6 +131,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		}
 
 		// check cert
+		c.applyPanelCertConfig(newN)
 		if newN.Security == panel.Tls {
 			err = c.requestCert()
 			if err != nil {

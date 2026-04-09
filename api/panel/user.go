@@ -153,3 +153,32 @@ func (c *Client) ReportNodeOnlineUsers(data *map[int][]string) error {
 	}
 	return nil
 }
+
+type ReportRequest struct {
+	Traffic map[int][]int64  `json:"traffic,omitempty"`
+	Alive   map[int][]string `json:"alive,omitempty"`
+}
+
+// Report merges traffic + alive into a single V2 API call
+func (c *Client) Report(traffic []UserTraffic, alive map[int][]string) error {
+	req := &ReportRequest{}
+	if len(traffic) > 0 {
+		req.Traffic = make(map[int][]int64, len(traffic))
+		for i := range traffic {
+			req.Traffic[traffic[i].UID] = []int64{traffic[i].Upload, traffic[i].Download}
+		}
+	}
+	if len(alive) > 0 {
+		req.Alive = alive
+	}
+	const path = "/api/v2/server/report"
+	r, err := c.client.R().
+		SetBody(req).
+		ForceContentType("application/json").
+		Post(path)
+	err = c.checkResponse(r, path, err)
+	if err != nil {
+		return err
+	}
+	return nil
+}

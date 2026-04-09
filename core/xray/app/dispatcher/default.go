@@ -36,6 +36,12 @@ import (
 var errSniffingTimeout = errors.New("timeout on sniffing")
 var excludeDomainRegexCache sync.Map
 
+var sniffBufPool = sync.Pool{
+	New: func() interface{} {
+		return buf.NewWithSize(32767)
+	},
+}
+
 type cachedReader struct {
 	sync.Mutex
 	reader buf.TimeoutReader
@@ -449,8 +455,11 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 }
 
 func sniffer(ctx context.Context, cReader *cachedReader, metadataOnly bool, network net.Network) (SniffResult, error) {
-	payload := buf.NewWithSize(32767)
-	defer payload.Release()
+	payload := sniffBufPool.Get().(*buf.Buffer)
+	defer func() {
+		payload.Clear()
+		sniffBufPool.Put(payload)
+	}()
 
 	sniffer := NewSniffer(ctx)
 

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +18,32 @@ import (
 	"github.com/xtls/xray-core/core"
 	coreConf "github.com/xtls/xray-core/infra/conf"
 )
+
+type networkSettingsProxyProtocol struct {
+	AcceptProxyProtocol bool `json:"acceptProxyProtocol"`
+}
+
+func detectProxyProtocolFromPanel(nodeInfo *panel.NodeInfo) bool {
+	var raw json.RawMessage
+	switch nodeInfo.Type {
+	case "vmess", "vless":
+		if nodeInfo.VAllss != nil {
+			raw = nodeInfo.VAllss.NetworkSettings
+		}
+	case "trojan":
+		if nodeInfo.Trojan != nil {
+			raw = nodeInfo.Trojan.NetworkSettings
+		}
+	}
+	if len(raw) == 0 {
+		return false
+	}
+	n := &networkSettingsProxyProtocol{}
+	if err := json.Unmarshal(raw, n); err != nil {
+		return false
+	}
+	return n.AcceptProxyProtocol
+}
 
 // BuildInbound build Inbound config for different protocol
 func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*core.InboundHandlerConfig, error) {
@@ -37,8 +64,23 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 	case "shadowsocks":
 		err = buildShadowsocks(option, nodeInfo, in)
 		network = "tcp"
+	case "hysteria":
+		err = buildHysteria(nodeInfo, in)
+		network = "hysteria"
+	case "hysteria2":
+		err = buildHysteria2(nodeInfo, in)
+		network = "hysteria"
+	case "tuic":
+		err = buildTuic(nodeInfo, in)
+		network = "tuic"
+	case "anytls":
+		err = buildAnyTLS(nodeInfo, in)
+		network = nodeInfo.AnyTls.Network
+		if network == "" {
+			network = "tcp"
+		}
 	default:
-		return nil, fmt.Errorf("unsupported node type: %s, Only support: V2ray, Trojan, Shadowsocks", nodeInfo.Type)
+		return nil, fmt.Errorf("unsupported node type: %s", nodeInfo.Type)
 	}
 	if err != nil {
 		return nil, err
@@ -64,30 +106,48 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 		sniffingConfig.Enabled = false
 	}
 	in.SniffingConfig = sniffingConfig
+
+	enableProxyProtocol := option.XrayOptions.EnableProxyProtocol
+	if pp := detectProxyProtocolFromPanel(nodeInfo); pp {
+		enableProxyProtocol = true
+	}
 	switch network {
 	case "tcp":
-		if in.StreamSetting.TCPSettings != nil {
-			in.StreamSetting.TCPSettings.AcceptProxyProtocol = option.XrayOptions.EnableProxyProtocol
+		if in.StreamSetting != nil && in.StreamSetting.TCPSettings != nil {
+			in.StreamSetting.TCPSettings.AcceptProxyProtocol = enableProxyProtocol || in.StreamSetting.TCPSettings.AcceptProxyProtocol
 		} else {
-			tcpSetting := &coreConf.TCPConfig{
-				AcceptProxyProtocol: option.XrayOptions.EnableProxyProtocol,
-			} //Enable proxy protocol
-			in.StreamSetting.TCPSettings = tcpSetting
+			if in.StreamSetting == nil {
+				t := coreConf.TransportProtocol("tcp")
+				in.StreamSetting = &coreConf.StreamConfig{Network: &t}
+			}
+			in.StreamSetting.TCPSettings = &coreConf.TCPConfig{
+				AcceptProxyProtocol: enableProxyProtocol,
+			}
 		}
 	case "ws":
-		if in.StreamSetting.WSSettings != nil {
-			in.StreamSetting.WSSettings.AcceptProxyProtocol = option.XrayOptions.EnableProxyProtocol
+		if in.StreamSetting != nil && in.StreamSetting.WSSettings != nil {
+			in.StreamSetting.WSSettings.AcceptProxyProtocol = enableProxyProtocol || in.StreamSetting.WSSettings.AcceptProxyProtocol
 		} else {
+			if in.StreamSetting == nil {
+				t := coreConf.TransportProtocol("ws")
+				in.StreamSetting = &coreConf.StreamConfig{Network: &t}
+			}
 			in.StreamSetting.WSSettings = &coreConf.WebSocketConfig{
-				AcceptProxyProtocol: option.XrayOptions.EnableProxyProtocol,
-			} //Enable proxy protocol
+				AcceptProxyProtocol: enableProxyProtocol,
+			}
 		}
+	case "hysteria", "tuic":
+		// QUIC-based protocols, no ProxyProtocol/TFO needed
 	default:
-		socketConfig := &coreConf.SocketConfig{
-			AcceptProxyProtocol: option.XrayOptions.EnableProxyProtocol,
-			TFO:                 option.XrayOptions.EnableTFO,
-		} //Enable proxy protocol
-		in.StreamSetting.SocketSettings = socketConfig
+		if in.StreamSetting == nil {
+			t := coreConf.TransportProtocol(network)
+			in.StreamSetting = &coreConf.StreamConfig{Network: &t}
+		}
+		if in.StreamSetting.SocketSettings == nil {
+			in.StreamSetting.SocketSettings = &coreConf.SocketConfig{}
+		}
+		in.StreamSetting.SocketSettings.AcceptProxyProtocol = enableProxyProtocol
+		in.StreamSetting.SocketSettings.TFO = option.XrayOptions.EnableTFO
 	}
 	// Set TLS or Reality settings
 	switch nodeInfo.Security {
@@ -101,7 +161,7 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 			break // disable
 		default:
 			in.StreamSetting.Security = "tls"
-			in.StreamSetting.TLSSettings = &coreConf.TLSConfig{
+			tlsCfg := &coreConf.TLSConfig{
 				Certs: []*coreConf.TLSCertConfig{
 					{
 						CertFile:     option.CertConfig.CertFile,
@@ -111,38 +171,50 @@ func buildInbound(option *conf.Options, nodeInfo *panel.NodeInfo, tag string) (*
 				},
 				RejectUnknownSNI: option.CertConfig.RejectUnknownSni,
 			}
+			if nodeInfo.Type == "hysteria" || nodeInfo.Type == "hysteria2" || nodeInfo.Type == "tuic" {
+				alpnList := &coreConf.StringList{"h3"}
+				tlsCfg.ALPN = alpnList
+			}
+			in.StreamSetting.TLSSettings = tlsCfg
 		}
 	case panel.Reality:
-		// Reality
 		in.StreamSetting.Security = "reality"
-		v := nodeInfo.VAllss
-		dest := v.TlsSettings.Dest
-		if dest == "" {
-			dest = v.TlsSettings.ServerName
+		var tlsSettings panel.TlsSettings
+		var realityConfig panel.RealityConfig
+		switch nodeInfo.Type {
+		case "vmess", "vless":
+			tlsSettings = nodeInfo.VAllss.TlsSettings
+			realityConfig = nodeInfo.VAllss.RealityConfig
+		case "trojan":
+			tlsSettings = nodeInfo.Trojan.TlsSettings
 		}
-		xver := v.TlsSettings.Xver
+		dest := tlsSettings.Dest
+		if dest == "" {
+			dest = tlsSettings.ServerName
+		}
+		xver := tlsSettings.Xver
 		if xver == 0 {
-			xver = v.RealityConfig.Xver
+			xver = realityConfig.Xver
 		}
 		d, err := json.Marshal(fmt.Sprintf(
 			"%s:%s",
 			dest,
-			v.TlsSettings.ServerPort))
+			tlsSettings.ServerPort))
 		if err != nil {
 			return nil, fmt.Errorf("marshal reality dest error: %s", err)
 		}
-		mtd, _ := time.ParseDuration(v.RealityConfig.MaxTimeDiff)
+		mtd, _ := time.ParseDuration(realityConfig.MaxTimeDiff)
 		in.StreamSetting.REALITYSettings = &coreConf.REALITYConfig{
 			Dest:         d,
 			Xver:         xver,
 			Show:         false,
-			ServerNames:  []string{v.TlsSettings.ServerName},
-			PrivateKey:   v.TlsSettings.PrivateKey,
-			MinClientVer: v.RealityConfig.MinClientVer,
-			MaxClientVer: v.RealityConfig.MaxClientVer,
+			ServerNames:  []string{tlsSettings.ServerName},
+			PrivateKey:   tlsSettings.PrivateKey,
+			MinClientVer: realityConfig.MinClientVer,
+			MaxClientVer: realityConfig.MaxClientVer,
 			MaxTimeDiff:  uint64(mtd.Microseconds()),
-			ShortIds:     []string{v.TlsSettings.ShortId},
-			Mldsa65Seed:  v.TlsSettings.Mldsa65Seed,
+			ShortIds:     []string{tlsSettings.ShortId},
+			Mldsa65Seed:  tlsSettings.Mldsa65Seed,
 		}
 	default:
 		break
@@ -273,26 +345,40 @@ func buildTrojan(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCo
 	}
 	t := coreConf.TransportProtocol(network)
 	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	if len(v.NetworkSettings) == 0 {
+		return nil
+	}
 	switch network {
 	case "tcp":
-		err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.TCPSettings)
-		if err != nil {
+		if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.TCPSettings); err != nil {
 			return fmt.Errorf("unmarshal tcp settings error: %s", err)
 		}
 	case "ws":
-		err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.WSSettings)
-		if err != nil {
+		if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.WSSettings); err != nil {
 			return fmt.Errorf("unmarshal ws settings error: %s", err)
 		}
 	case "grpc":
-		err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.GRPCSettings)
-		if err != nil {
+		if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.GRPCSettings); err != nil {
 			return fmt.Errorf("unmarshal grpc settings error: %s", err)
+		}
+	case "httpupgrade":
+		if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.HTTPUPGRADESettings); err != nil {
+			return fmt.Errorf("unmarshal httpupgrade settings error: %s", err)
+		}
+	case "splithttp", "xhttp":
+		if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.SplitHTTPSettings); err != nil {
+			return fmt.Errorf("unmarshal xhttp settings error: %s", err)
 		}
 	default:
 		return errors.New("the network type is not vail")
 	}
 	return nil
+}
+
+type shadowsocksHTTPNetworkSettings struct {
+	AcceptProxyProtocol bool   `json:"acceptProxyProtocol"`
+	Path                string `json:"path"`
+	Host                string `json:"Host"`
 }
 
 func buildShadowsocks(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
@@ -319,15 +405,206 @@ func buildShadowsocks(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *c
 	}
 	settings.Users = append(settings.Users, defaultSSuser)
 	settings.NetworkList = &coreConf.NetworkList{"tcp", "udp"}
-	settings.IVCheck = true
-	if config.XrayOptions.DisableIVCheck {
-		settings.IVCheck = false
+
+	if len(s.NetworkSettings) != 0 {
+		shttp := &shadowsocksHTTPNetworkSettings{}
+		if err := json.Unmarshal(s.NetworkSettings, shttp); err != nil {
+			return fmt.Errorf("unmarshal shadowsocks network settings error: %s", err)
+		}
+		if shttp.Path != "" || shttp.Host != "" {
+			settings.NetworkList = &coreConf.NetworkList{"tcp"}
+		}
+		if shttp.AcceptProxyProtocol || shttp.Path != "" || shttp.Host != "" {
+			t := coreConf.TransportProtocol("tcp")
+			inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+			inbound.StreamSetting.TCPSettings = &coreConf.TCPConfig{
+				AcceptProxyProtocol: shttp.AcceptProxyProtocol,
+			}
+			if shttp.Path != "" || shttp.Host != "" {
+				httpHeader := map[string]interface{}{
+					"type":    "http",
+					"request": map[string]interface{}{},
+				}
+				request := httpHeader["request"].(map[string]interface{})
+				path := shttp.Path
+				if path == "" {
+					path = "/"
+				}
+				request["path"] = []string{path}
+				if shttp.Host != "" {
+					request["headers"] = map[string]interface{}{
+						"Host": []string{shttp.Host},
+					}
+				}
+				headerJSON, err := json.Marshal(httpHeader)
+				if err == nil {
+					inbound.StreamSetting.TCPSettings.HeaderConfig = json.RawMessage(headerJSON)
+				}
+			}
+		}
 	}
-	t := coreConf.TransportProtocol("tcp")
-	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	if inbound.StreamSetting == nil {
+		t := coreConf.TransportProtocol("tcp")
+		inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	}
+
 	sets, err := json.Marshal(settings)
 	if err != nil {
 		return fmt.Errorf("marshal shadowsocks settings error: %s", err)
+	}
+	inbound.Settings = (*json.RawMessage)(&sets)
+	return nil
+}
+
+func buildHysteria(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
+	inbound.Protocol = "hysteria"
+	s := nodeInfo.Hysteria
+	settings := &coreConf.HysteriaServerConfig{
+		Version: 1,
+	}
+	t := coreConf.TransportProtocol("hysteria")
+	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	hysteriaSetting := &coreConf.HysteriaConfig{
+		Version: 1,
+	}
+	var finalMask *coreConf.FinalMask
+	if s.UpMbps > 0 || s.DownMbps > 0 {
+		up := coreConf.Bandwidth(strconv.Itoa(s.UpMbps) + "mbps")
+		down := coreConf.Bandwidth(strconv.Itoa(s.DownMbps) + "mbps")
+		finalMask = &coreConf.FinalMask{
+			QuicParams: &coreConf.QuicParamsConfig{
+				Congestion: "force-brutal",
+				BrutalUp:   up,
+				BrutalDown: down,
+			},
+		}
+	}
+	if s.Obfs != "" {
+		rawObfsJSON := json.RawMessage(fmt.Sprintf(`{"password":"%s"}`, s.Obfs))
+		udp := []coreConf.Mask{
+			{
+				Type:     "salamander",
+				Settings: &rawObfsJSON,
+			},
+		}
+		if finalMask == nil {
+			finalMask = &coreConf.FinalMask{}
+		}
+		finalMask.Udp = udp
+	}
+	inbound.StreamSetting.FinalMask = finalMask
+	inbound.StreamSetting.HysteriaSettings = hysteriaSetting
+	sets, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal hysteria settings error: %s", err)
+	}
+	inbound.Settings = (*json.RawMessage)(&sets)
+	return nil
+}
+
+func buildHysteria2(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
+	inbound.Protocol = "hysteria"
+	s := nodeInfo.Hysteria2
+	settings := &coreConf.HysteriaServerConfig{
+		Version: 2,
+	}
+
+	t := coreConf.TransportProtocol("hysteria")
+	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	hysteriaSetting := &coreConf.HysteriaConfig{
+		Version: 2,
+	}
+	var finalMask *coreConf.FinalMask
+	if !s.Ignore_Client_Bandwidth && (s.UpMbps > 0 || s.DownMbps > 0) {
+		up := coreConf.Bandwidth(strconv.Itoa(s.UpMbps) + "mbps")
+		down := coreConf.Bandwidth(strconv.Itoa(s.DownMbps) + "mbps")
+		finalMask = &coreConf.FinalMask{
+			QuicParams: &coreConf.QuicParamsConfig{
+				Congestion: "force-brutal",
+				BrutalUp:   up,
+				BrutalDown: down,
+			},
+		}
+	}
+	if s.ObfsType != "" && s.ObfsPassword != "" {
+		rawObfsJSON := json.RawMessage(fmt.Sprintf(`{"password":"%s"}`, s.ObfsPassword))
+		udp := []coreConf.Mask{
+			{
+				Type:     s.ObfsType,
+				Settings: &rawObfsJSON,
+			},
+		}
+		if finalMask == nil {
+			finalMask = &coreConf.FinalMask{}
+		}
+		finalMask.Udp = udp
+	}
+	inbound.StreamSetting.FinalMask = finalMask
+	inbound.StreamSetting.HysteriaSettings = hysteriaSetting
+	sets, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal hysteria2 settings error: %s", err)
+	}
+	inbound.Settings = (*json.RawMessage)(&sets)
+	return nil
+}
+
+func buildTuic(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
+	inbound.Protocol = "tuic"
+	s := nodeInfo.Tuic
+	settings := &coreConf.TuicServerConfig{
+		CongestionControl: s.CongestionControl,
+		ZeroRttHandshake:  s.ZeroRTTHandshake,
+	}
+	t := coreConf.TransportProtocol("tuic")
+	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	sets, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal tuic settings error: %s", err)
+	}
+	inbound.Settings = (*json.RawMessage)(&sets)
+	return nil
+}
+
+func buildAnyTLS(nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {
+	inbound.Protocol = "anytls"
+	v := nodeInfo.AnyTls
+	settings := &coreConf.AnyTLSServerConfig{
+		PaddingScheme: v.PaddingScheme,
+	}
+	network := v.Network
+	if network == "" {
+		network = "tcp"
+	}
+	t := coreConf.TransportProtocol(network)
+	inbound.StreamSetting = &coreConf.StreamConfig{Network: &t}
+	if len(v.NetworkSettings) != 0 {
+		switch network {
+		case "tcp":
+			if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.TCPSettings); err != nil {
+				return fmt.Errorf("unmarshal tcp settings error: %s", err)
+			}
+		case "ws":
+			if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.WSSettings); err != nil {
+				return fmt.Errorf("unmarshal ws settings error: %s", err)
+			}
+		case "grpc":
+			if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.GRPCSettings); err != nil {
+				return fmt.Errorf("unmarshal grpc settings error: %s", err)
+			}
+		case "httpupgrade":
+			if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.HTTPUPGRADESettings); err != nil {
+				return fmt.Errorf("unmarshal httpupgrade settings error: %s", err)
+			}
+		case "splithttp", "xhttp":
+			if err := json.Unmarshal(v.NetworkSettings, &inbound.StreamSetting.SplitHTTPSettings); err != nil {
+				return fmt.Errorf("unmarshal xhttp settings error: %s", err)
+			}
+		}
+	}
+	sets, err := json.Marshal(settings)
+	if err != nil {
+		return fmt.Errorf("marshal anytls settings error: %s", err)
 	}
 	inbound.Settings = (*json.RawMessage)(&sets)
 	return nil
