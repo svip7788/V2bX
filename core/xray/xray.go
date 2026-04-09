@@ -92,6 +92,10 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 		}
 		os.Setenv("XRAY_DNS_PATH", c.DnsConfigPath)
 	}
+	if len(coreDnsConfig.Servers) == 0 {
+		coreDnsConfig.Servers = defaultDNSServers()
+		log.Info("No custom DNS configured, using built-in defaults (DoH + DoT + UDP)")
+	}
 	if coreDnsConfig.QueryStrategy == "" && !hasPublicIPv6() {
 		coreDnsConfig.QueryStrategy = "UseIPv4"
 		log.Info("No public IPv6 detected, DNS QueryStrategy set to UseIPv4")
@@ -226,6 +230,28 @@ func (c *Xray) Protocols() []string {
 
 func (c *Xray) Type() string {
 	return "xray"
+}
+
+func defaultDNSServers() []*coreConf.NameServerConfig {
+	addresses := []string{
+		"https://dns.google/dns-query",
+		"https://8.8.8.8/dns-query",
+		"tcp-tls://dns.google",
+		"tcp-tls://8.8.8.8",
+		"tcp://8.8.8.8",
+		"8.8.8.8",
+	}
+	servers := make([]*coreConf.NameServerConfig, 0, len(addresses))
+	for _, addr := range addresses {
+		raw := []byte(`"` + addr + `"`)
+		ns := &coreConf.NameServerConfig{}
+		if err := json.Unmarshal(raw, ns); err != nil {
+			log.WithField("addr", addr).Warn("skip invalid default DNS address")
+			continue
+		}
+		servers = append(servers, ns)
+	}
+	return servers
 }
 
 func hasPublicIPv6() bool {

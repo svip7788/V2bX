@@ -25,7 +25,9 @@ func updateDNSConfig(node *panel.NodeInfo) (err error) {
 	} else if len(node.RawDNS.DNSMap) != 0 {
 		dnsConfig := DNSConfig{
 			Servers: []interface{}{
-				"1.1.1.1",
+				"https://dns.google/dns-query",
+				"tcp-tls://8.8.8.8",
+				"8.8.8.8",
 				"localhost"},
 			Tag: "dns_inbound",
 		}

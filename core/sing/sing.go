@@ -15,6 +15,8 @@ import (
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing/common/json"
+
+	llog "github.com/sirupsen/logrus"
 )
 
 var _ vCore.Core = (*Sing)(nil)
@@ -71,6 +73,15 @@ func New(c *conf.CoreConfig) (vCore.Core, error) {
 			ServerPort: c.SingConfig.NtpConfig.ServerPort,
 		},
 	}
+	if options.DNS == nil || len(options.DNS.Servers) == 0 {
+		defaultDNS, err := defaultSingDNS(ctx)
+		if err != nil {
+			llog.WithField("err", err).Warn("Failed to build default DNS for sing-box, using empty DNS")
+		} else {
+			options.DNS = defaultDNS
+			llog.Info("No custom DNS configured for sing-box, using built-in defaults (DoH + DoT + UDP)")
+		}
+	}
 	os.Setenv("SING_DNS_PATH", "")
 	b, err := box.New(box.Options{
 		Context: ctx,
@@ -119,4 +130,23 @@ func (b *Sing) Protocols() []string {
 
 func (b *Sing) Type() string {
 	return "sing"
+}
+
+func defaultSingDNS(ctx context.Context) (*option.DNSOptions, error) {
+	defaultJSON := []byte(`{
+		"dns": {
+			"servers": [
+				{"tag": "google-doh",  "type": "https",  "server": "dns.google", "server_port": 443, "path": "/dns-query"},
+				{"tag": "google-dot",  "type": "tls",    "server": "dns.google", "server_port": 853},
+				{"tag": "google-udp",  "type": "udp",    "server": "8.8.8.8",   "server_port": 53},
+				{"tag": "google-tcp",  "type": "tcp",    "server": "8.8.8.8",   "server_port": 53}
+			],
+			"final": "google-doh"
+		}
+	}`)
+	opts, err := json.UnmarshalExtendedContext[option.Options](ctx, defaultJSON)
+	if err != nil {
+		return nil, err
+	}
+	return opts.DNS, nil
 }

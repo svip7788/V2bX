@@ -1,6 +1,10 @@
 {
     "servers": [
-        "1.1.1.1",
+        "https://dns.google/dns-query",
+        "https://8.8.8.8/dns-query",
+        "tcp-tls://dns.google",
+        "tcp-tls://8.8.8.8",
+        "tcp://8.8.8.8",
         "8.8.8.8",
         "localhost"
     ],
