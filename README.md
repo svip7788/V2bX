@@ -63,7 +63,7 @@
 ### 一键安装
 
 ```bash
-wget -N https://raw.githubusercontent.com/svip7788/V2bX/master/install/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/install.sh && bash install.sh
 ```
 
 ### 手动安装
