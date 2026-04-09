@@ -150,8 +150,10 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 	dynamicExpired := u.ExpireTime != 0 && u.ExpireTime < time.Now().Unix()
 	if dynamicExpired {
 		userLimit = u.SpeedLimit
-	} else {
+	} else if u.DynamicSpeedLimit > 0 {
 		userLimit = determineSpeedLimit(u.SpeedLimit, u.DynamicSpeedLimit)
+	} else {
+		userLimit = u.SpeedLimit
 	}
 
 	if noSSUDP {
@@ -191,6 +193,12 @@ func (l *Limiter) CheckLimit(taguuid string, ip string, isTcp bool, noSSUDP bool
 
 	if dynamicExpired {
 		l.mu.Lock()
+		if info, ok := l.userLimitInfo[taguuid]; ok {
+			cleared := *info
+			cleared.DynamicSpeedLimit = 0
+			cleared.ExpireTime = 0
+			l.userLimitInfo[taguuid] = &cleared
+		}
 		delete(l.speedLimiter, taguuid)
 		l.mu.Unlock()
 	}

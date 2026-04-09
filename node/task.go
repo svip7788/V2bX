@@ -239,8 +239,8 @@ func (c *Controller) SpeedChecker() error {
 			if err != nil {
 				log.WithField("err", err).Error("Update dynamic speed limit failed")
 			}
-			delete(c.traffic, u)
 		}
 	}
+	c.traffic = make(map[string]int64)
 	return nil
 }
