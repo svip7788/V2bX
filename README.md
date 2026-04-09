@@ -10,7 +10,7 @@
 * 支持 VMess/VLess、Trojan、Shadowsocks、Hysteria1/2、Tuic、AnyTLS 多种协议
 * 支持 VLess + XTLS/Reality 等新特性
 * 支持单实例对接多节点，无需重复启动
-* 支持 WebSocket 实时推送（配合 Xboard 面板）
+* 支持 WebSocket 实时推送（配合 Xboard 面板，需在面板服务器执行 `php artisan ws-server start --d` 启动 WS 服务）
 * 支持限制在线 IP、TCP 连接数
 * 支持节点端口级别、用户级别限速
 * 支持动态限速（按时间段、速率阈值自动触发）
