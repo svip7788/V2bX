@@ -72,7 +72,10 @@ func (c *Controller) requestCert() error {
 }
 
 func generateSelfSslCertificate(domain, certPath, keyPath string) error {
-	key, _ := rsa.GenerateKey(rand.Reader, 2048)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return fmt.Errorf("generate rsa key error: %s", err)
+	}
 	tmpl := &x509.Certificate{
 		Version:      3,
 		SerialNumber: big.NewInt(time.Now().Unix()),
@@ -90,27 +93,19 @@ func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(certPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	err = pem.Encode(f, &pem.Block{
+	certPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
 		Bytes: cert,
 	})
-	if err != nil {
-		return err
+	if err = os.WriteFile(certPath, certPEM, 0644); err != nil {
+		return fmt.Errorf("write cert file error: %s", err)
 	}
-	f, err = os.OpenFile(keyPath, os.O_CREATE|os.O_RDWR, 0644)
-	if err != nil {
-		return err
-	}
-	err = pem.Encode(f, &pem.Block{
-		Type:  "EC PRIVATE KEY",
+	keyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
-	if err != nil {
-		return err
+	if err = os.WriteFile(keyPath, keyPEM, 0644); err != nil {
+		return fmt.Errorf("write key file error: %s", err)
 	}
 	return nil
 }

@@ -148,7 +148,10 @@ func (b *Sing) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic,
 	defer b.users.mapLock.RUnlock()
 	if v, ok := hook.counter.Load(tag); ok {
 		c := v.(*counter.TrafficCounter)
-		minBytes := b.nodeReportMinTrafficBytes[tag]
+		var minBytes int64
+		if mv, ok := b.nodeReportMinTrafficBytes.Load(tag); ok {
+			minBytes = mv.(int64)
+		}
 		c.Counters.Range(func(key, value interface{}) bool {
 			uuid := key.(string)
 			traffic := value.(*counter.TrafficStorage)

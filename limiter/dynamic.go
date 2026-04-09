@@ -78,8 +78,14 @@ func inTimeRanges(ranges []timeRange, now time.Time) bool {
 	utc8 := now.In(time.FixedZone("UTC+8", 8*3600))
 	cur := utc8.Hour()*60 + utc8.Minute()
 	for _, r := range ranges {
-		if cur >= r.startMin && cur < r.endMin {
-			return true
+		if r.startMin <= r.endMin {
+			if cur >= r.startMin && cur < r.endMin {
+				return true
+			}
+		} else {
+			if cur >= r.startMin || cur < r.endMin {
+				return true
+			}
 		}
 	}
 	return false

@@ -244,11 +244,19 @@ func (u *User) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("check path error: %s", err)
 	}
-	u.KeyEncoded, _ = EncodePrivate(u.key.(*ecdsa.PrivateKey))
+	pk, ok := u.key.(*ecdsa.PrivateKey)
+	if !ok {
+		return fmt.Errorf("private key is not *ecdsa.PrivateKey")
+	}
+	u.KeyEncoded, err = EncodePrivate(pk)
+	if err != nil {
+		return fmt.Errorf("encode private key error: %s", err)
+	}
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
+	defer f.Close()
 	err = json.NewEncoder(f).Encode(u)
 	if err != nil {
 		return fmt.Errorf("marshal json error: %s", err)
@@ -259,8 +267,10 @@ func (u *User) Save(path string) error {
 
 func (u *User) DecodePrivate(pemEncodedPriv string) (*ecdsa.PrivateKey, error) {
 	blockPriv, _ := pem.Decode([]byte(pemEncodedPriv))
-	x509EncodedPriv := blockPriv.Bytes
-	privateKey, err := x509.ParseECPrivateKey(x509EncodedPriv)
+	if blockPriv == nil {
+		return nil, fmt.Errorf("failed to decode PEM block")
+	}
+	privateKey, err := x509.ParseECPrivateKey(blockPriv.Bytes)
 	return privateKey, err
 }
 

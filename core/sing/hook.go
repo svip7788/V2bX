@@ -29,7 +29,7 @@ func (h *HookServer) ModeList() []string {
 func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
-		log.Error("get limiter for ", m.Inbound, " error: ", err)
+		log.Warn("get limiter for ", m.Inbound, " error: ", err)
 		conn.Close()
 		return conn
 	}
@@ -37,19 +37,19 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	ip := m.Source.Addr.String()
 	if b, r := l.CheckLimit(taguuid, ip, true, true); r {
 		conn.Close()
-		log.Error("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
+		log.Info("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
 		return conn
 	} else if b != nil {
 		conn = rate.NewConnRateLimiter(conn, b)
 	}
 	destStr := m.Destination.AddrString()
 	if l.CheckDomainRule(destStr) {
-		log.Error("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
+		log.Warn("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
 		conn.Close()
 		return conn
 	}
 	if protocol := m.Protocol; len(protocol) != 0 && l.CheckProtocolRule(protocol) {
-		log.Error("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
+		log.Warn("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
 		conn.Close()
 		return conn
 	}
@@ -69,7 +69,7 @@ func (h *HookServer) getCounter(tag string) *counter.TrafficCounter {
 func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
-		log.Error("get limiter for ", m.Inbound, " error: ", err)
+		log.Warn("get limiter for ", m.Inbound, " error: ", err)
 		conn.Close()
 		return conn
 	}
@@ -77,17 +77,17 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 	taguuid := format.UserTag(m.Inbound, m.User)
 	if _, r := l.CheckLimit(taguuid, ip, false, false); r {
 		conn.Close()
-		log.Error("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
+		log.Info("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
 		return conn
 	}
 	destStr := m.Destination.AddrString()
 	if l.CheckDomainRule(destStr) {
-		log.Error("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
+		log.Warn("[", m.Inbound, "] User ", m.User, " access domain ", destStr, " reject by rule")
 		conn.Close()
 		return conn
 	}
 	if protocol := m.Destination.Network(); len(protocol) != 0 && l.CheckProtocolRule(protocol) {
-		log.Error("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
+		log.Warn("[", m.Inbound, "] User ", m.User, " access protocol ", protocol, " reject by rule")
 		conn.Close()
 		return conn
 	}

@@ -2,7 +2,6 @@ package node
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"sync"
 
@@ -21,6 +20,7 @@ type Controller struct {
 	limiter                   *limiter.Limiter
 	traffic                   map[string]int64
 	userList                  []panel.UserInfo
+	uidToUUID                 map[int]string
 	aliveMap                  map[int]int
 	info                      *panel.NodeInfo
 	nodeInfoMonitorPeriodic   *task.Task
@@ -57,9 +57,6 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
 	}
-	if len(c.userList) == 0 {
-		return errors.New("add users error: not have any user")
-	}
 	c.aliveMap, err = c.apiClient.GetUserAlive()
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -92,16 +89,21 @@ func (c *Controller) Start() error {
 	if err != nil {
 		return fmt.Errorf("add new node error: %s", err)
 	}
-	added, err := c.server.AddUsers(&vCore.AddUsersParams{
-		Tag:      c.tag,
-		Users:    c.userList,
-		NodeInfo: node,
-	})
-	if err != nil {
-		return fmt.Errorf("add users error: %s", err)
+	if len(c.userList) > 0 {
+		added, err := c.server.AddUsers(&vCore.AddUsersParams{
+			Tag:      c.tag,
+			Users:    c.userList,
+			NodeInfo: node,
+		})
+		if err != nil {
+			return fmt.Errorf("add users error: %s", err)
+		}
+		log.WithField("tag", c.tag).Infof("Added %d new users", added)
+	} else {
+		log.WithField("tag", c.tag).Warn("No available users, node started with empty user list")
 	}
-	log.WithField("tag", c.tag).Infof("Added %d new users", added)
 	c.info = node
+	c.rebuildUIDToUUID()
 	c.startTasks(node)
 	c.tryStartWebSocket()
 	return nil
@@ -179,6 +181,12 @@ func (c *Controller) handleWSEvents() {
 				return
 			}
 			c.processWSEvent(evt)
+			if c.wsClient.DroppedAndReset() {
+				log.WithField("tag", c.tag).Warn("WS events were dropped, triggering full sync")
+				if err := c.nodeInfoMonitor(); err != nil {
+					log.WithField("err", err).Warn("Full sync after WS drop failed")
+				}
+			}
 		}
 	}
 }
@@ -265,6 +273,7 @@ func (c *Controller) applyFullUsers(newUsers []panel.UserInfo) {
 			Infof("WS: %d user deleted, %d user added", len(deleted), len(added))
 	}
 	c.userList = newUsers
+	c.rebuildUIDToUUID()
 }
 
 func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
@@ -273,10 +282,23 @@ func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
 		if len(users) == 0 {
 			return
 		}
+		existSet := make(map[string]struct{}, len(c.userList))
+		for _, u := range c.userList {
+			existSet[u.Uuid] = struct{}{}
+		}
+		var newUsers []panel.UserInfo
+		for _, u := range users {
+			if _, dup := existSet[u.Uuid]; !dup {
+				newUsers = append(newUsers, u)
+			}
+		}
+		if len(newUsers) == 0 {
+			return
+		}
 		if _, err := c.server.AddUsers(&vCore.AddUsersParams{
 			Tag:      c.tag,
 			NodeInfo: c.info,
-			Users:    users,
+			Users:    newUsers,
 		}); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
@@ -284,9 +306,12 @@ func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
 			}).Error("WS: delta add users failed")
 			return
 		}
-		c.limiter.UpdateUser(c.tag, users, nil)
-		c.userList = append(c.userList, users...)
-		log.WithField("tag", c.tag).Infof("WS: delta added %d users", len(users))
+		c.limiter.UpdateUser(c.tag, newUsers, nil)
+		c.userList = append(c.userList, newUsers...)
+		for i := range newUsers {
+			c.uidToUUID[newUsers[i].Id] = newUsers[i].Uuid
+		}
+		log.WithField("tag", c.tag).Infof("WS: delta added %d users", len(newUsers))
 
 	case "remove":
 		if len(users) == 0 {
@@ -314,6 +339,9 @@ func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
 			}
 		}
 		c.userList = filtered
+		for _, u := range users {
+			delete(c.uidToUUID, u.Id)
+		}
 		log.WithField("tag", c.tag).Infof("WS: delta removed %d users", len(users))
 	}
 }

@@ -94,6 +94,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		// nodeInfo changed
 		if newU != nil {
 			c.userList = newU
+			c.rebuildUIDToUUID()
 		}
 		c.traffic = make(map[string]int64)
 		// Remove old node
@@ -118,6 +119,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			}
 			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, aliveList)
 			c.limiter = l
+		} else if newU != nil {
+			deleted, added := compareUserList(c.userList, newU)
+			if len(added) > 0 || len(deleted) > 0 {
+				c.limiter.UpdateUser(c.tag, added, deleted)
+			}
 		}
 		// update alive list
 		if newA != nil {
@@ -155,17 +161,19 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			}).Panic("Add node failed")
 			return nil
 		}
-		_, err = c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			Users:    c.userList,
-			NodeInfo: newN,
-		})
-		if err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("Add users failed")
-			return nil
+		if len(c.userList) > 0 {
+			_, err = c.server.AddUsers(&vCore.AddUsersParams{
+				Tag:      c.tag,
+				Users:    c.userList,
+				NodeInfo: newN,
+			})
+			if err != nil {
+				log.WithFields(log.Fields{
+					"tag": c.tag,
+					"err": err,
+				}).Error("Add users failed")
+				return nil
+			}
 		}
 		// Check interval
 		if c.nodeInfoMonitorPeriodic.Interval != newN.PullInterval &&
@@ -176,7 +184,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			newN.PushInterval != 0 {
 			c.userReportPeriodic.Restart(newN.PushInterval)
 		}
-		log.WithField("tag", c.tag).Infof("Added %d new users", len(c.userList))
+		log.WithField("tag", c.tag).Infof("Reloaded node with %d users", len(c.userList))
 		// exit
 		return nil
 	}
@@ -222,6 +230,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	}
 	c.userList = newU
 	if len(added)+len(deleted) != 0 {
+		c.rebuildUIDToUUID()
 		log.WithField("tag", c.tag).
 			Infof("%d user deleted, %d user added", len(deleted), len(added))
 	}

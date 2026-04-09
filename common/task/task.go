@@ -2,6 +2,7 @@ package task
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +14,8 @@ type Task struct {
 	stop     chan struct{}
 	done     chan struct{}
 	execMu   sync.Mutex
+
+	pendingInterval atomic.Int64
 }
 
 func (t *Task) runExecute() error {
@@ -26,6 +29,9 @@ func (t *Task) Start(first bool) error {
 	if t.running {
 		t.access.Unlock()
 		return nil
+	}
+	if t.Interval <= 0 {
+		t.Interval = time.Second
 	}
 	t.running = true
 	t.stop = make(chan struct{})
@@ -54,6 +60,11 @@ func (t *Task) Start(first bool) error {
 				t.close()
 				return
 			}
+
+			if ns := t.pendingInterval.Swap(0); ns > 0 {
+				ticker.Reset(time.Duration(ns))
+				t.Interval = time.Duration(ns)
+			}
 		}
 	}()
 
@@ -79,8 +90,10 @@ func (t *Task) Close() {
 	}
 }
 
+// Restart changes the interval. Safe to call from within Execute.
 func (t *Task) Restart(interval time.Duration) {
-	t.Close()
-	t.Interval = interval
-	_ = t.Start(false)
+	if interval <= 0 {
+		interval = time.Second
+	}
+	t.pendingInterval.Store(int64(interval))
 }

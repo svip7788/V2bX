@@ -105,6 +105,14 @@ func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int
 	return nil
 }
 
+func (c *Controller) rebuildUIDToUUID() {
+	m := make(map[int]string, len(c.userList))
+	for i := range c.userList {
+		m[c.userList[i].Id] = c.userList[i].Uuid
+	}
+	c.uidToUUID = m
+}
+
 func (c *Controller) addDynamicTraffic(userTraffic []panel.UserTraffic) {
 	if !c.LimitConfig.EnableDynamicSpeedLimit || c.LimitConfig.DynamicSpeedLimitConfig == nil {
 		return
@@ -115,12 +123,8 @@ func (c *Controller) addDynamicTraffic(userTraffic []panel.UserTraffic) {
 	if c.traffic == nil {
 		c.traffic = make(map[string]int64)
 	}
-	uidToUUID := make(map[int]string, len(c.userList))
-	for i := range c.userList {
-		uidToUUID[c.userList[i].Id] = c.userList[i].Uuid
-	}
 	for i := range userTraffic {
-		uuid, ok := uidToUUID[userTraffic[i].UID]
+		uuid, ok := c.uidToUUID[userTraffic[i].UID]
 		if !ok {
 			continue
 		}

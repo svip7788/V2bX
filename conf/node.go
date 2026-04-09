@@ -40,19 +40,20 @@ func (n *NodeConfig) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 	if len(rn.Include) != 0 {
-		file, _ := strings.CutPrefix(rn.Include, ":")
-		switch file {
-		case "http", "https":
-			rsp, err := http.Get(file)
+		if strings.HasPrefix(rn.Include, "http://") || strings.HasPrefix(rn.Include, "https://") {
+			rsp, err := http.Get(rn.Include)
 			if err != nil {
-				return err
+				return fmt.Errorf("fetch include url error: %s", err)
 			}
 			defer rsp.Body.Close()
+			if rsp.StatusCode >= 400 {
+				return fmt.Errorf("fetch include url error: status code %d", rsp.StatusCode)
+			}
 			data, err = io.ReadAll(json5.NewTrimNodeReader(rsp.Body))
 			if err != nil {
-				return fmt.Errorf("open include file error: %s", err)
+				return fmt.Errorf("read include url error: %s", err)
 			}
-		default:
+		} else {
 			f, err := os.Open(rn.Include)
 			if err != nil {
 				return fmt.Errorf("open include file error: %s", err)
@@ -60,7 +61,7 @@ func (n *NodeConfig) UnmarshalJSON(data []byte) (err error) {
 			defer f.Close()
 			data, err = io.ReadAll(json5.NewTrimNodeReader(f))
 			if err != nil {
-				return fmt.Errorf("open include file error: %s", err)
+				return fmt.Errorf("read include file error: %s", err)
 			}
 		}
 		err = json.Unmarshal(data, &rn)

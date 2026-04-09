@@ -33,7 +33,7 @@ type Sing struct {
 	router                    adapter.Router
 	logFactory                log.Factory
 	users                     *UserMap
-	nodeReportMinTrafficBytes map[string]int64
+	nodeReportMinTrafficBytes sync.Map // tag -> int64
 }
 
 type UserMap struct {
@@ -103,7 +103,6 @@ func New(c *conf.CoreConfig) (vCore.Core, error) {
 		users: &UserMap{
 			uidMap: make(map[string]int),
 		},
-		nodeReportMinTrafficBytes: make(map[string]int64),
 	}, nil
 }
 

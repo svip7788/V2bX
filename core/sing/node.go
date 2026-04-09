@@ -408,7 +408,6 @@ func getInboundOptions(tag string, info *panel.NodeInfo, c *conf.Options) (optio
 }
 
 func (b *Sing) AddNode(tag string, info *panel.NodeInfo, config *conf.Options) error {
-	b.nodeReportMinTrafficBytes[tag] = config.ReportMinTraffic * 1024
 	c, err := getInboundOptions(tag, info, config)
 	if err != nil {
 		return err
@@ -426,6 +425,7 @@ func (b *Sing) AddNode(tag string, info *panel.NodeInfo, config *conf.Options) e
 	if err != nil {
 		return fmt.Errorf("add inbound error: %s", err)
 	}
+	b.nodeReportMinTrafficBytes.Store(tag, config.ReportMinTraffic*1024)
 	return nil
 }
 
@@ -436,6 +436,6 @@ func (b *Sing) DelNode(tag string) error {
 		return fmt.Errorf("delete inbound error: %s", err)
 	}
 	b.hookServer.counter.Delete(tag)
-	delete(b.nodeReportMinTrafficBytes, tag)
+	b.nodeReportMinTrafficBytes.Delete(tag)
 	return nil
 }

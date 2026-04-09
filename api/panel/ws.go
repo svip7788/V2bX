@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"encoding/json"
@@ -43,6 +44,7 @@ type WSClient struct {
 	closed   bool
 	stopCh   chan struct{}
 	eventCh  chan WSEvent
+	dropped  atomic.Bool
 	apiHost  string
 	token    string
 	nodeId   int
@@ -114,6 +116,11 @@ func (ws *WSClient) connect(wsURL string) error {
 		return fmt.Errorf("ws dial error: %w", err)
 	}
 	ws.mu.Lock()
+	if ws.closed {
+		ws.mu.Unlock()
+		conn.Close()
+		return fmt.Errorf("ws client already closed")
+	}
 	ws.conn = conn
 	ws.mu.Unlock()
 	return nil
@@ -171,6 +178,7 @@ func (ws *WSClient) readLoop() {
 		select {
 		case ws.eventCh <- evt:
 		default:
+			ws.dropped.Store(true)
 			log.Warn("WS event channel full, dropping event: ", evt.Event)
 		}
 	}
@@ -224,11 +232,19 @@ func (ws *WSClient) Events() <-chan WSEvent {
 }
 
 func (ws *WSClient) SendDeviceReport(data map[int][]string) {
-	msg, _ := json.Marshal(map[string]interface{}{
+	msg, err := json.Marshal(map[string]interface{}{
 		"event": "report.devices",
 		"data":  data,
 	})
+	if err != nil {
+		log.WithField("err", err).Warn("WS marshal device report failed")
+		return
+	}
 	ws.send(msg)
+}
+
+func (ws *WSClient) DroppedAndReset() bool {
+	return ws.dropped.Swap(false)
 }
 
 func (ws *WSClient) IsConnected() bool {

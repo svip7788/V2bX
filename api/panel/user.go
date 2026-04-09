@@ -50,7 +50,7 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 	if err = c.checkResponse(r, path, err); err != nil {
 		return nil, err
 	}
-	userlist := &UserListBody{}
+	userlist := &UserListBody{Users: []UserInfo{}}
 	if strings.Contains(r.Header().Get("Content-Type"), "application/x-msgpack") {
 		decoder := msgpack.NewDecoder(r.RawResponse.Body)
 		if err := decoder.Decode(userlist); err != nil {
@@ -127,7 +127,13 @@ type UserTraffic struct {
 func (c *Client) ReportUserTraffic(userTraffic []UserTraffic) error {
 	data := make(map[int][]int64, len(userTraffic))
 	for i := range userTraffic {
-		data[userTraffic[i].UID] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
+		uid := userTraffic[i].UID
+		if existing, ok := data[uid]; ok {
+			existing[0] += userTraffic[i].Upload
+			existing[1] += userTraffic[i].Download
+		} else {
+			data[uid] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
+		}
 	}
 	const path = "/api/v1/server/UniProxy/push"
 	r, err := c.client.R().
@@ -165,7 +171,13 @@ func (c *Client) Report(traffic []UserTraffic, alive map[int][]string) error {
 	if len(traffic) > 0 {
 		req.Traffic = make(map[int][]int64, len(traffic))
 		for i := range traffic {
-			req.Traffic[traffic[i].UID] = []int64{traffic[i].Upload, traffic[i].Download}
+			uid := traffic[i].UID
+			if existing, ok := req.Traffic[uid]; ok {
+				existing[0] += traffic[i].Upload
+				existing[1] += traffic[i].Download
+			} else {
+				req.Traffic[uid] = []int64{traffic[i].Upload, traffic[i].Download}
+			}
 		}
 	}
 	if len(alive) > 0 {
