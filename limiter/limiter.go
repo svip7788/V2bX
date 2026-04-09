@@ -134,6 +134,16 @@ func (l *Limiter) InDynamicLimitTimeRange() bool {
 	return inTimeRanges(l.dyTimeRanges, time.Now())
 }
 
+func (l *Limiter) IsDynamicLimited(tag, uuid string) bool {
+	key := format.UserTag(tag, uuid)
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	if u, ok := l.userLimitInfo[key]; ok {
+		return u.DynamicSpeedLimit > 0 && (u.ExpireTime == 0 || u.ExpireTime > time.Now().Unix())
+	}
+	return false
+}
+
 func (l *Limiter) UpdateDynamicSpeedLimit(tag, uuid string, limit int, expire time.Time) error {
 	key := format.UserTag(tag, uuid)
 	l.mu.Lock()

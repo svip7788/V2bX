@@ -243,7 +243,11 @@ func (c *Controller) SpeedChecker() error {
 	if triggerTime <= 0 {
 		triggerTime = 60
 	}
-	triggerSpeedBytes := int64(cfg.DyLimitTriggerSpeed) * 1000000 / 8 // Mbps -> bytes/s
+	triggerSpeed := cfg.DyLimitTriggerSpeed
+	if triggerSpeed <= 0 {
+		triggerSpeed = 100
+	}
+	triggerSpeedBytes := int64(triggerSpeed) * 1000000 / 8 // Mbps -> bytes/s
 	limitTime := cfg.DyLimitTime
 	if limitTime <= 0 {
 		limitTime = 600
@@ -264,6 +268,9 @@ func (c *Controller) SpeedChecker() error {
 			continue
 		}
 		if c.limiter.IsWhitelisted(uid) {
+			continue
+		}
+		if c.limiter.IsDynamicLimited(c.tag, uuid) {
 			continue
 		}
 		avgBytesPerSec := totalBytes / int64(triggerTime)
