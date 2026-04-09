@@ -7,8 +7,10 @@ type LimitConfig struct {
 }
 
 type DynamicSpeedLimitConfig struct {
-	Periodic   int   `json:"Periodic"`   // check interval in seconds
-	Traffic    int64 `json:"Traffic"`    // traffic threshold in bytes
-	SpeedLimit int   `json:"SpeedLimit"` // speed limit in Mbps after trigger
-	ExpireTime int   `json:"ExpireTime"` // limit duration in minutes
+	DyLimitDuration     string `json:"DyLimitDuration"`     // time periods, e.g. "20:00-24:00,00:00-02:00", empty = all day, UTC+8
+	DyLimitTriggerTime  int    `json:"DyLimitTriggerTime"`  // trigger window in seconds, default 60
+	DyLimitTriggerSpeed int    `json:"DyLimitTriggerSpeed"` // trigger threshold in Mbps, default 100
+	DyLimitSpeed        int    `json:"DyLimitSpeed"`        // speed limit after trigger in Mbps, default 30
+	DyLimitTime         int    `json:"DyLimitTime"`         // limit duration in seconds, default 600
+	DyLimitWhiteUserID  string `json:"DyLimitWhiteUserID"`  // whitelist user IDs, comma separated
 }

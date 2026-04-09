@@ -44,14 +44,13 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 			log.WithField("tag", c.tag).Warn("DynamicSpeedLimitConfig is nil, skip dynamic speed limit task")
 			return
 		}
-		periodic := c.LimitConfig.DynamicSpeedLimitConfig.Periodic
-		if periodic <= 0 {
-			log.WithField("tag", c.tag).Warn("DynamicSpeedLimitConfig.Periodic <= 0, skip dynamic speed limit task")
-			return
+		triggerTime := c.LimitConfig.DynamicSpeedLimitConfig.DyLimitTriggerTime
+		if triggerTime <= 0 {
+			triggerTime = 60
 		}
 		c.traffic = make(map[string]int64)
 		c.dynamicSpeedLimitPeriodic = &task.Task{
-			Interval: time.Duration(periodic) * time.Second,
+			Interval: time.Duration(triggerTime) * time.Second,
 			Execute:  c.SpeedChecker,
 		}
 		log.Printf("[%s: %d] Start dynamic speed limit", c.apiClient.NodeType, c.apiClient.NodeId)
@@ -232,17 +231,54 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 func (c *Controller) SpeedChecker() error {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
-	if !c.LimitConfig.EnableDynamicSpeedLimit || c.LimitConfig.DynamicSpeedLimitConfig == nil {
+	cfg := c.LimitConfig.DynamicSpeedLimitConfig
+	if !c.LimitConfig.EnableDynamicSpeedLimit || cfg == nil {
 		return nil
 	}
+	if !c.limiter.InDynamicLimitTimeRange() {
+		c.traffic = make(map[string]int64)
+		return nil
+	}
+	triggerTime := cfg.DyLimitTriggerTime
+	if triggerTime <= 0 {
+		triggerTime = 60
+	}
+	triggerSpeedBytes := int64(cfg.DyLimitTriggerSpeed) * 1000000 / 8 // Mbps -> bytes/s
+	limitTime := cfg.DyLimitTime
+	if limitTime <= 0 {
+		limitTime = 600
+	}
+	limitSpeed := cfg.DyLimitSpeed
+	if limitSpeed <= 0 {
+		limitSpeed = 30
+	}
 
-	for u, t := range c.traffic {
-		if t >= c.LimitConfig.DynamicSpeedLimitConfig.Traffic {
-			err := c.limiter.UpdateDynamicSpeedLimit(c.tag, u,
-				c.LimitConfig.DynamicSpeedLimitConfig.SpeedLimit,
-				time.Now().Add(time.Duration(c.LimitConfig.DynamicSpeedLimitConfig.ExpireTime)*time.Minute))
+	uidToUUID := make(map[int]string, len(c.userList))
+	for i := range c.userList {
+		uidToUUID[c.userList[i].Id] = c.userList[i].Uuid
+	}
+
+	for uuid, totalBytes := range c.traffic {
+		uid, ok := c.limiter.GetUIDByUUID(uuid)
+		if !ok {
+			continue
+		}
+		if c.limiter.IsWhitelisted(uid) {
+			continue
+		}
+		avgBytesPerSec := totalBytes / int64(triggerTime)
+		if avgBytesPerSec >= triggerSpeedBytes {
+			err := c.limiter.UpdateDynamicSpeedLimit(c.tag, uuid,
+				limitSpeed,
+				time.Now().Add(time.Duration(limitTime)*time.Second))
 			if err != nil {
 				log.WithField("err", err).Error("Update dynamic speed limit failed")
+			} else {
+				log.WithFields(log.Fields{
+					"tag":  c.tag,
+					"uuid": uuid,
+					"avg":  avgBytesPerSec * 8 / 1000000,
+				}).Info("Dynamic speed limit triggered")
 			}
 		}
 	}

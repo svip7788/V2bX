@@ -25,13 +25,15 @@ type Limiter struct {
 	ProtocolRules []string
 	SpeedLimit    int
 
-	mu            sync.RWMutex
-	userLimitInfo map[string]*UserLimitInfo
-	speedLimiter  map[string]*ratelimit.Bucket
-	userOnlineIP  map[string]map[string]int // taguuid -> (ip -> uid)
-	oldUserOnline map[string]int            // ip -> uid
-	uuidToUID     map[string]int
-	aliveList     map[int]int
+	mu              sync.RWMutex
+	userLimitInfo   map[string]*UserLimitInfo
+	speedLimiter    map[string]*ratelimit.Bucket
+	userOnlineIP    map[string]map[string]int // taguuid -> (ip -> uid)
+	oldUserOnline   map[string]int            // ip -> uid
+	uuidToUID       map[string]int
+	aliveList       map[int]int
+	dyWhitelist     map[int]struct{}
+	dyTimeRanges    []timeRange
 }
 
 type UserLimitInfo struct {
@@ -51,6 +53,10 @@ func AddLimiter(tag string, l *conf.LimitConfig, users []panel.UserInfo, aliveLi
 		userOnlineIP:  make(map[string]map[string]int),
 		oldUserOnline: make(map[string]int),
 		aliveList:     aliveList,
+	}
+	if l.DynamicSpeedLimitConfig != nil {
+		info.dyWhitelist = parseWhitelist(l.DynamicSpeedLimitConfig.DyLimitWhiteUserID)
+		info.dyTimeRanges = parseTimeRanges(l.DynamicSpeedLimitConfig.DyLimitDuration)
 	}
 	uuidmap := make(map[string]int, len(users))
 	for i := range users {
@@ -114,6 +120,18 @@ func (l *Limiter) UpdateUser(tag string, added []panel.UserInfo, deleted []panel
 		l.userLimitInfo[format.UserTag(tag, added[i].Uuid)] = ul
 		l.uuidToUID[added[i].Uuid] = added[i].Id
 	}
+}
+
+func (l *Limiter) IsWhitelisted(uid int) bool {
+	if l.dyWhitelist == nil {
+		return false
+	}
+	_, ok := l.dyWhitelist[uid]
+	return ok
+}
+
+func (l *Limiter) InDynamicLimitTimeRange() bool {
+	return inTimeRanges(l.dyTimeRanges, time.Now())
 }
 
 func (l *Limiter) UpdateDynamicSpeedLimit(tag, uuid string, limit int, expire time.Time) error {
