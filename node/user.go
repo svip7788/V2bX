@@ -80,14 +80,12 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int][]string, onlineDeviceCount int) error {
 	if len(userTraffic) > 0 {
 		err := c.apiClient.ReportUserTraffic(userTraffic)
-		rollbackFailed := false
 		if err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
 			}).Info("Report user traffic failed")
 			if rollbackErr := c.server.RestoreUserTraffic(c.tag, userTraffic); rollbackErr != nil {
-				rollbackFailed = true
 				log.WithFields(log.Fields{
 					"tag": c.tag,
 					"err": rollbackErr,
@@ -96,9 +94,6 @@ func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int
 		} else {
 			c.addDynamicTraffic(userTraffic)
 			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
-		}
-		if rollbackFailed {
-			c.addDynamicTraffic(userTraffic)
 		}
 	}
 	if len(aliveData) > 0 {

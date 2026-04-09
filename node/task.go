@@ -44,9 +44,14 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 			log.WithField("tag", c.tag).Warn("DynamicSpeedLimitConfig is nil, skip dynamic speed limit task")
 			return
 		}
+		periodic := c.LimitConfig.DynamicSpeedLimitConfig.Periodic
+		if periodic <= 0 {
+			log.WithField("tag", c.tag).Warn("DynamicSpeedLimitConfig.Periodic <= 0, skip dynamic speed limit task")
+			return
+		}
 		c.traffic = make(map[string]int64)
 		c.dynamicSpeedLimitPeriodic = &task.Task{
-			Interval: time.Duration(c.LimitConfig.DynamicSpeedLimitConfig.Periodic) * time.Second,
+			Interval: time.Duration(periodic) * time.Second,
 			Execute:  c.SpeedChecker,
 		}
 		log.Printf("[%s: %d] Start dynamic speed limit", c.apiClient.NodeType, c.apiClient.NodeId)

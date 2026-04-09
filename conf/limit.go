@@ -7,8 +7,8 @@ type LimitConfig struct {
 }
 
 type DynamicSpeedLimitConfig struct {
-	Periodic   int   `json:"Periodic"`
-	Traffic    int64 `json:"Traffic"`
-	SpeedLimit int   `json:"SpeedLimit"`
-	ExpireTime int   `json:"ExpireTime"`
+	Periodic   int   `json:"Periodic"`   // check interval in seconds
+	Traffic    int64 `json:"Traffic"`    // traffic threshold in bytes
+	SpeedLimit int   `json:"SpeedLimit"` // speed limit in Mbps after trigger
+	ExpireTime int   `json:"ExpireTime"` // limit duration in minutes
 }
