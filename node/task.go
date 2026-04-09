@@ -257,11 +257,6 @@ func (c *Controller) SpeedChecker() error {
 		limitSpeed = 30
 	}
 
-	uidToUUID := make(map[int]string, len(c.userList))
-	for i := range c.userList {
-		uidToUUID[c.userList[i].Id] = c.userList[i].Uuid
-	}
-
 	for uuid, totalBytes := range c.traffic {
 		uid, ok := c.limiter.GetUIDByUUID(uuid)
 		if !ok {

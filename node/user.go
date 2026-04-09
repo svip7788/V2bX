@@ -58,22 +58,17 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			"tag": c.tag,
 			"err": reportErr,
 		}).Info("V2 report failed, fallback to V1")
-		if err := c.reportV1(userTraffic, aliveData, onlineDeviceCount); err != nil {
-			return nil
-		}
-	} else {
-		if len(userTraffic) > 0 {
-			c.addDynamicTraffic(userTraffic)
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
-		}
-		if onlineDeviceCount > 0 {
-			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
-		}
+		_ = c.reportV1(userTraffic, aliveData, onlineDeviceCount)
+		return nil
 	}
-
-	if len(aliveData) > 0 || reportErr == nil {
-		c.limiter.MarkOnlineDeviceReported()
+	if len(userTraffic) > 0 {
+		c.addDynamicTraffic(userTraffic)
+		log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
 	}
+	if onlineDeviceCount > 0 {
+		log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
+	}
+	c.limiter.MarkOnlineDeviceReported()
 	return nil
 }
 
