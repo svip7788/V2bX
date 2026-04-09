@@ -34,21 +34,15 @@
 
 ## 安装
 
-从 [Releases](https://github.com/svip7788/V2bX/releases) 下载对应平台的 zip 包，解压后将 `V2bX` 放到 `/usr/local/bin/` 即可：
+### 一键安装
 
 ```bash
-# 自动检测架构并安装最新版
-ARCH=$(uname -m)
-case "$ARCH" in
-  x86_64|amd64) ARCH_NAME="64" ;;
-  aarch64|arm64) ARCH_NAME="arm64-v8a" ;;
-  armv7*) ARCH_NAME="arm32-v7a" ;;
-esac
-VERSION=$(curl -sL https://api.github.com/repos/svip7788/V2bX/releases/latest | grep '"tag_name"' | head -1 | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
-wget -O /tmp/v2bx.zip "https://github.com/svip7788/V2bX/releases/download/${VERSION}/V2bX-linux-${ARCH_NAME}.zip"
-unzip -o /tmp/v2bx.zip -d /tmp/v2bx && cp /tmp/v2bx/V2bX /usr/local/bin/v2bx && chmod +x /usr/local/bin/v2bx
-rm -rf /tmp/v2bx /tmp/v2bx.zip
+wget -N https://raw.githubusercontent.com/svip7788/V2bX/master/install/install.sh && bash install.sh
 ```
+
+### 手动安装
+
+从 [Releases](https://github.com/svip7788/V2bX/releases) 下载对应平台的 zip 包。
 
 ## 构建
 
