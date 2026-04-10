@@ -20,8 +20,12 @@ type ConnCounter struct {
 }
 
 func NewConnCounter(conn net.Conn, s *TrafficStorage) net.Conn {
+	extended, ok := conn.(network.ExtendedConn)
+	if !ok {
+		extended = bufio.NewExtendedConn(conn)
+	}
 	return &ConnCounter{
-		ExtendedConn: bufio.NewExtendedConn(conn),
+		ExtendedConn: extended,
 		storage:      s,
 		readFunc: func(n int64) {
 			s.UpCounter.Add(n)

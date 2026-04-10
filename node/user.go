@@ -8,6 +8,7 @@ import (
 func (c *Controller) reportUserTrafficTask() (err error) {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
+	defer c.limiter.MarkOnlineDeviceReported()
 
 	userTraffic, trafficErr := c.server.GetUserTrafficSlice(c.tag, true)
 	if trafficErr != nil {
@@ -58,7 +59,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 			"tag": c.tag,
 			"err": reportErr,
 		}).Info("V2 report failed, fallback to V1")
-		_ = c.reportV1(userTraffic, aliveData, onlineDeviceCount)
+		c.reportV1(userTraffic, aliveData, onlineDeviceCount)
 		return nil
 	}
 	if len(userTraffic) > 0 {
@@ -68,11 +69,10 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	if onlineDeviceCount > 0 {
 		log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
 	}
-	c.limiter.MarkOnlineDeviceReported()
 	return nil
 }
 
-func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int][]string, onlineDeviceCount int) error {
+func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int][]string, onlineDeviceCount int) {
 	if len(userTraffic) > 0 {
 		err := c.apiClient.ReportUserTraffic(userTraffic)
 		if err != nil {
@@ -99,10 +99,8 @@ func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int
 			}).Info("Report online users failed")
 		} else {
 			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
-			c.limiter.MarkOnlineDeviceReported()
 		}
 	}
-	return nil
 }
 
 func (c *Controller) rebuildUIDToUUID() {

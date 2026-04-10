@@ -1,4 +1,4 @@
-# V2bX v1.0.1
+# V2bX v1.0.2
 
 一个基于多种内核的 V2board/Xboard 节点服务端，支持 VMess/VLess、Trojan、Shadowsocks、Hysteria1/2、Tuic、AnyTLS 协议。
 
@@ -33,6 +33,13 @@
 | 按用户限速 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 动态限速 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | WebSocket 实时推送 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+## v1.0.2 更新日志
+
+### 内存优化
+* 修复 MarkOnlineDeviceReported 在上报失败时不调用导致 userOnlineIP 持续累积内存泄漏
+* ConnCounter 避免对已实现 ExtendedConn 的连接重复包装，减少每连接内存开销
+* 新增可选 pprof HTTP 端点（配置 `PprofListen`），支持在线内存诊断
 
 ## v1.0.1 更新日志
 
@@ -73,7 +80,7 @@ wget -N https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/install.
 ## 构建
 
 ```bash
-GOEXPERIMENT=jsonv2 go build -v -o V2bX -tags "sing xray with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=1.0.1' -s -w -buildid="
+GOEXPERIMENT=jsonv2 go build -v -o V2bX -tags "sing xray with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=1.0.2' -s -w -buildid="
 ```
 
 ## 免责声明
