@@ -1,24 +1,15 @@
 package cmd
 
 import (
-	"net/http"
-	_ "net/http/pprof"
-	"os"
-	"os/signal"
-	"runtime"
-	"syscall"
-
 	"github.com/InazumaV/V2bX/conf"
-	vCore "github.com/InazumaV/V2bX/core"
-	"github.com/InazumaV/V2bX/limiter"
-	"github.com/InazumaV/V2bX/node"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
 var (
-	config string
-	watch  bool
+	config      string
+	watch       bool
+	childNodeID int
 )
 
 var serverCommand = cobra.Command{
@@ -35,105 +26,40 @@ func init() {
 	serverCommand.PersistentFlags().
 		BoolVarP(&watch, "watch", "w",
 			true, "watch file path change")
+	serverCommand.Flags().
+		IntVar(&childNodeID, "child-node-id", 0, "internal child node id")
+	_ = serverCommand.Flags().MarkHidden("child-node-id")
 	command.AddCommand(&serverCommand)
 }
 
 func serverHandle(_ *cobra.Command, _ []string) {
-	showVersion()
+	if childNodeID == 0 {
+		showVersion()
+	}
 	c := conf.New()
 	err := c.LoadFromPath(config)
 	if err != nil {
 		log.WithField("err", err).Error("Load config file failed")
 		return
 	}
-	switch c.LogConfig.Level {
-	case "debug":
-		log.SetLevel(log.DebugLevel)
-	case "info":
-		log.SetLevel(log.InfoLevel)
-	case "warn":
-		log.SetLevel(log.WarnLevel)
-	case "error":
-		log.SetLevel(log.ErrorLevel)
+
+	cleanup, err := configureServerLogging(c)
+	if err != nil {
+		log.WithField("err", err).Error("Open log file failed, using stdout instead")
 	}
-	if c.LogConfig.Output != "" {
-		f, err := os.OpenFile(c.LogConfig.Output, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			log.WithField("err", err).Error("Open log file failed, using stdout instead")
-		} else {
-			defer f.Close()
-			log.SetOutput(f)
+	defer cleanup()
+
+	if childNodeID > 0 {
+		if err := runChildNodeServer(c, config, childNodeID); err != nil {
+			log.WithFields(log.Fields{
+				"node_id": childNodeID,
+				"err":     err,
+			}).Error("Run child node failed")
 		}
-	}
-	if c.LogConfig.PprofListen != "" {
-		go func() {
-			log.Infof("pprof listening on %s", c.LogConfig.PprofListen)
-			if err := http.ListenAndServe(c.LogConfig.PprofListen, nil); err != nil {
-				log.WithField("err", err).Error("pprof server failed")
-			}
-		}()
-	}
-	limiter.Init()
-	log.Info("Start V2bX...")
-	vc, err := vCore.NewCore(c.CoresConfig)
-	if err != nil {
-		log.WithField("err", err).Error("new core failed")
 		return
 	}
-	err = vc.Start()
-	if err != nil {
-		log.WithField("err", err).Error("Start core failed")
-		return
-	}
-	defer vc.Close()
-	log.Info("Core ", vc.Type(), " started")
-	nodes := node.New()
-	err = nodes.Start(c.NodeConfig, vc)
-	if err != nil {
-		log.WithField("err", err).Error("Run nodes failed")
-		return
-	}
-	log.Info("Nodes started")
-	xdns := os.Getenv("XRAY_DNS_PATH")
-	sdns := os.Getenv("SING_DNS_PATH")
-	if watch {
-		err = c.Watch(config, xdns, sdns, func() {
-			nodes.Close()
-			err = vc.Close()
-			if err != nil {
-				log.WithField("err", err).Error("Restart node failed")
-				return
-			}
-			vc, err = vCore.NewCore(c.CoresConfig)
-			if err != nil {
-				log.WithField("err", err).Error("New core failed")
-				return
-			}
-			err = vc.Start()
-			if err != nil {
-				log.WithField("err", err).Error("Start core failed")
-				return
-			}
-			log.Info("Core ", vc.Type(), " restarted")
-			err = nodes.Start(c.NodeConfig, vc)
-			if err != nil {
-				log.WithField("err", err).Error("Run nodes failed")
-				return
-			}
-			log.Info("Nodes restarted")
-			runtime.GC()
-		})
-		if err != nil {
-			log.WithField("err", err).Error("start watch failed")
-			return
-		}
-	}
-	// clear memory
-	runtime.GC()
-	// wait exit signal
-	{
-		osSignals := make(chan os.Signal, 1)
-		signal.Notify(osSignals, syscall.SIGINT, syscall.SIGTERM)
-		<-osSignals
+
+	if err := runMasterServer(c, config, watch); err != nil {
+		log.WithField("err", err).Error("Run master server failed")
 	}
 }

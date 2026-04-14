@@ -36,11 +36,13 @@ func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) 
 					default:
 						log.Println("config file changed, reloading...")
 					}
-					*p = *New()
-					err := p.LoadFromPath(filePath)
+					next := New()
+					err := next.LoadFromPath(filePath)
 					if err != nil {
 						log.Printf("reload config error: %s", err)
+						return
 					}
+					*p = *next
 					reload()
 					log.Println("reload config success")
 				}()

@@ -244,24 +244,9 @@ func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCon
 			inbound.Settings = (*json.RawMessage)(&s)
 		} else {
 			var err error
-			decryption := "none"
-			if nodeInfo.VAllss.Encryption != "" {
-				switch nodeInfo.VAllss.Encryption {
-				case "mlkem768x25519plus":
-					encSettings := nodeInfo.VAllss.EncryptionSettings
-					parts := []string{
-						"mlkem768x25519plus",
-						encSettings.Mode,
-						encSettings.Ticket,
-					}
-					if encSettings.ServerPadding != "" {
-						parts = append(parts, encSettings.ServerPadding)
-					}
-					parts = append(parts, encSettings.PrivateKey)
-					decryption = strings.Join(parts, ".")
-				default:
-					return fmt.Errorf("vless decryption method %s is not support", nodeInfo.VAllss.Encryption)
-				}
+			decryption, err := resolveVLESSDecryption(nodeInfo.VAllss)
+			if err != nil {
+				return err
 			}
 			s, err := json.Marshal(&coreConf.VLessInboundConfig{
 				Decryption: decryption,
@@ -317,6 +302,35 @@ func buildV2ray(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreCon
 		return errors.New("the network type is not vail")
 	}
 	return nil
+}
+
+func resolveVLESSDecryption(v *panel.VAllssNode) (string, error) {
+	if v == nil {
+		return "none", nil
+	}
+	// Prefer the final decryption string provided by the panel.
+	if decryption := strings.TrimSpace(v.Decryption); decryption != "" {
+		return decryption, nil
+	}
+	if v.Encryption == "" {
+		return "none", nil
+	}
+	switch v.Encryption {
+	case "mlkem768x25519plus":
+		encSettings := v.EncryptionSettings
+		parts := []string{
+			"mlkem768x25519plus",
+			encSettings.Mode,
+			encSettings.Ticket,
+		}
+		if encSettings.ServerPadding != "" {
+			parts = append(parts, encSettings.ServerPadding)
+		}
+		parts = append(parts, encSettings.PrivateKey)
+		return strings.Join(parts, "."), nil
+	default:
+		return "", fmt.Errorf("vless decryption method %s is not support", v.Encryption)
+	}
 }
 
 func buildTrojan(config *conf.Options, nodeInfo *panel.NodeInfo, inbound *coreConf.InboundDetourConfig) error {

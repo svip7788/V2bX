@@ -79,6 +79,7 @@ type VAllssNode struct {
 	Network             string          `json:"network"`
 	NetworkSettings     json.RawMessage `json:"network_settings"`
 	NetworkSettingsBack json.RawMessage `json:"networkSettings"`
+	Decryption          string          `json:"decryption"`
 	Encryption          string          `json:"encryption"`
 	EncryptionSettings  EncSettings     `json:"encryption_settings"`
 	ServerName          string          `json:"server_name"`
