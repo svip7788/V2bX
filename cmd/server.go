@@ -7,9 +7,9 @@ import (
 )
 
 var (
-	config      string
-	watch       bool
-	childNodeID int
+	config          string
+	watch           bool
+	childGroupIndex int
 )
 
 var serverCommand = cobra.Command{
@@ -27,13 +27,13 @@ func init() {
 		BoolVarP(&watch, "watch", "w",
 			true, "watch file path change")
 	serverCommand.Flags().
-		IntVar(&childNodeID, "child-node-id", 0, "internal child node id")
-	_ = serverCommand.Flags().MarkHidden("child-node-id")
+		IntVar(&childGroupIndex, "child-node-group", 0, "internal child node group")
+	_ = serverCommand.Flags().MarkHidden("child-node-group")
 	command.AddCommand(&serverCommand)
 }
 
 func serverHandle(_ *cobra.Command, _ []string) {
-	if childNodeID == 0 {
+	if childGroupIndex == 0 {
 		showVersion()
 	}
 	c := conf.New()
@@ -49,12 +49,12 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	}
 	defer cleanup()
 
-	if childNodeID > 0 {
-		if err := runChildNodeServer(c, config, childNodeID); err != nil {
+	if childGroupIndex > 0 {
+		if err := runChildGroupServer(c, config, childGroupIndex); err != nil {
 			log.WithFields(log.Fields{
-				"node_id": childNodeID,
-				"err":     err,
-			}).Error("Run child node failed")
+				"group_id": childGroupIndex,
+				"err":      err,
+			}).Error("Run child group failed")
 		}
 		return
 	}

@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,6 +36,11 @@ type workerGeneration struct {
 	mu       sync.Mutex
 	children map[int]*exec.Cmd
 	wg       sync.WaitGroup
+}
+
+type nodeGroup struct {
+	ID    int
+	Nodes []conf.NodeConfig
 }
 
 func newWorkerGeneration() *workerGeneration {
@@ -84,14 +88,14 @@ func newNodeProcessManager(configPath string) *nodeProcessManager {
 }
 
 func (m *nodeProcessManager) StartAll(c *conf.Conf) error {
-	nodeIDs, err := collectNodeIDs(c.NodeConfig)
+	groups, err := collectNodeGroups(c.NodeConfig)
 	if err != nil {
 		return err
 	}
 	gen := newWorkerGeneration()
-	for _, nodeID := range nodeIDs {
+	for _, group := range groups {
 		gen.wg.Add(1)
-		go m.runChildLoop(gen, nodeID)
+		go m.runChildLoop(gen, group)
 	}
 
 	m.mu.Lock()
@@ -106,7 +110,7 @@ func (m *nodeProcessManager) StartAll(c *conf.Conf) error {
 }
 
 func (m *nodeProcessManager) Replace(c *conf.Conf) error {
-	if _, err := collectNodeIDs(c.NodeConfig); err != nil {
+	if _, err := collectNodeGroups(c.NodeConfig); err != nil {
 		return err
 	}
 	if err := m.StopAll(); err != nil {
@@ -145,7 +149,7 @@ func (m *nodeProcessManager) StopAll() error {
 	}
 }
 
-func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, nodeID int) {
+func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, group nodeGroup) {
 	defer gen.wg.Done()
 
 	for {
@@ -155,11 +159,12 @@ func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, nodeID int) {
 		default:
 		}
 
-		cmd, err := m.buildChildCommand(nodeID)
+		cmd, err := m.buildChildCommand(group)
 		if err != nil {
 			log.WithFields(log.Fields{
-				"node_id": nodeID,
-				"err":     err,
+				"group_id": group.ID,
+				"node_ids": formatNodeIDs(group.Nodes),
+				"err":      err,
 			}).Error("Build child process failed")
 			if !waitForRestart(gen.ctx) {
 				return
@@ -169,8 +174,9 @@ func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, nodeID int) {
 
 		if err := cmd.Start(); err != nil {
 			log.WithFields(log.Fields{
-				"node_id": nodeID,
-				"err":     err,
+				"group_id": group.ID,
+				"node_ids": formatNodeIDs(group.Nodes),
+				"err":      err,
 			}).Error("Start child process failed")
 			if !waitForRestart(gen.ctx) {
 				return
@@ -178,19 +184,23 @@ func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, nodeID int) {
 			continue
 		}
 
-		gen.setChild(nodeID, cmd)
+		gen.setChild(group.ID, cmd)
 		log.WithFields(log.Fields{
-			"node_id": nodeID,
-			"pid":     cmd.Process.Pid,
+			"group_id": group.ID,
+			"node_ids": formatNodeIDs(group.Nodes),
+			"pid":      cmd.Process.Pid,
 		}).Info("Node worker started")
 
 		err = cmd.Wait()
-		gen.removeChild(nodeID, cmd)
+		gen.removeChild(group.ID, cmd)
 		if gen.ctx.Err() != nil {
 			return
 		}
 
-		fields := log.Fields{"node_id": nodeID}
+		fields := log.Fields{
+			"group_id": group.ID,
+			"node_ids": formatNodeIDs(group.Nodes),
+		}
 		if cmd.Process != nil {
 			fields["pid"] = cmd.Process.Pid
 		}
@@ -207,12 +217,12 @@ func (m *nodeProcessManager) runChildLoop(gen *workerGeneration, nodeID int) {
 	}
 }
 
-func (m *nodeProcessManager) buildChildCommand(nodeID int) (*exec.Cmd, error) {
+func (m *nodeProcessManager) buildChildCommand(group nodeGroup) (*exec.Cmd, error) {
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable error: %w", err)
 	}
-	workDir := childWorkDir(executable, nodeID)
+	workDir := childWorkDir(executable, group.ID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("create child work dir error: %w", err)
 	}
@@ -220,7 +230,7 @@ func (m *nodeProcessManager) buildChildCommand(nodeID int) (*exec.Cmd, error) {
 		"server",
 		"-c", m.configPath,
 		"--watch=false",
-		"--child-node-id", strconv.Itoa(nodeID),
+		"--child-node-group", strconv.Itoa(group.ID),
 	}
 	cmd := exec.Command(executable, args...)
 	cmd.Dir = workDir
@@ -258,11 +268,11 @@ func configureServerLogging(c *conf.Conf) (func(), error) {
 }
 
 func runMasterServer(c *conf.Conf, configPath string, enableWatch bool) error {
-	nodeIDs, err := collectNodeIDs(c.NodeConfig)
+	groups, err := collectNodeGroups(c.NodeConfig)
 	if err != nil {
 		return err
 	}
-	if len(nodeIDs) > 1 && c.LogConfig.PprofListen != "" {
+	if len(groups) > 1 && c.LogConfig.PprofListen != "" {
 		log.WithField("listen", c.LogConfig.PprofListen).Warn("Pprof is disabled in master-worker mode with multiple nodes")
 	}
 
@@ -296,27 +306,35 @@ func runMasterServer(c *conf.Conf, configPath string, enableWatch bool) error {
 	return nil
 }
 
-func runChildNodeServer(c *conf.Conf, configPath string, nodeID int) error {
-	fullNodeCount := len(c.NodeConfig)
-	selectedNodes, err := filterNodeConfigsByID(c.NodeConfig, nodeID)
+func runChildGroupServer(c *conf.Conf, configPath string, groupID int) error {
+	groups, err := collectNodeGroups(c.NodeConfig)
 	if err != nil {
 		return err
 	}
-	c.NodeConfig = selectedNodes
-	c.CoresConfig, err = prepareChildCoreConfigs(c.CoresConfig, selectedNodes[0], nodeID)
+	fullGroupCount := len(groups)
+	selectedGroup, err := findNodeGroupByID(groups, groupID)
+	if err != nil {
+		return err
+	}
+	c.NodeConfig = selectedGroup.Nodes
+	c.CoresConfig, err = prepareChildCoreConfigs(c.CoresConfig, selectedGroup.Nodes[0], groupID)
 	if err != nil {
 		return err
 	}
 
-	if fullNodeCount > 1 && c.LogConfig.PprofListen != "" {
+	if fullGroupCount > 1 && c.LogConfig.PprofListen != "" {
 		log.WithFields(log.Fields{
-			"node_id": nodeID,
-			"listen":  c.LogConfig.PprofListen,
+			"group_id": groupID,
+			"node_ids": formatNodeIDs(selectedGroup.Nodes),
+			"listen":   c.LogConfig.PprofListen,
 		}).Warn("Skip pprof in child mode to avoid port conflicts")
 		c.LogConfig.PprofListen = ""
 	}
 
-	log.WithField("node_id", nodeID).Info("Node worker booting")
+	log.WithFields(log.Fields{
+		"group_id": groupID,
+		"node_ids": formatNodeIDs(selectedGroup.Nodes),
+	}).Info("Node worker booting")
 	return runManagedNodeServer(c, configPath, false)
 }
 
@@ -404,34 +422,48 @@ func detectMasterWatchPaths(c *conf.Conf) (string, string) {
 	return "", ""
 }
 
-func collectNodeIDs(nodes []conf.NodeConfig) ([]int, error) {
+func collectNodeGroups(nodes []conf.NodeConfig) ([]nodeGroup, error) {
 	if len(nodes) == 0 {
 		return nil, errors.New("no node config")
 	}
-	ids := make([]int, 0, len(nodes))
-	seen := make(map[int]struct{}, len(nodes))
-	for _, nodeConfig := range nodes {
-		nodeID := nodeConfig.ApiConfig.NodeID
-		if nodeID <= 0 {
-			return nil, fmt.Errorf("invalid node id: %d", nodeID)
+	groups := make([]nodeGroup, 0, len(nodes))
+	seen := make(map[string]struct{})
+	for i, nodeConfig := range nodes {
+		expanded, err := nodeConfig.ExpandedNodes()
+		if err != nil {
+			return nil, err
 		}
-		if _, ok := seen[nodeID]; ok {
-			return nil, fmt.Errorf("duplicate node id: %d", nodeID)
+		for _, expandedNode := range expanded {
+			key := fmt.Sprintf("%s|%s|%s|%d",
+				strings.ToLower(expandedNode.ApiConfig.APIHost),
+				expandedNode.ApiConfig.Key,
+				strings.ToLower(expandedNode.ApiConfig.NodeType),
+				expandedNode.ApiConfig.NodeID,
+			)
+			if _, ok := seen[key]; ok {
+				return nil, fmt.Errorf("duplicate node target: %s %s %d",
+					expandedNode.ApiConfig.APIHost,
+					expandedNode.ApiConfig.NodeType,
+					expandedNode.ApiConfig.NodeID,
+				)
+			}
+			seen[key] = struct{}{}
 		}
-		seen[nodeID] = struct{}{}
-		ids = append(ids, nodeID)
+		groups = append(groups, nodeGroup{
+			ID:    i + 1,
+			Nodes: expanded,
+		})
 	}
-	sort.Ints(ids)
-	return ids, nil
+	return groups, nil
 }
 
-func filterNodeConfigsByID(nodes []conf.NodeConfig, nodeID int) ([]conf.NodeConfig, error) {
-	for _, nodeConfig := range nodes {
-		if nodeConfig.ApiConfig.NodeID == nodeID {
-			return []conf.NodeConfig{nodeConfig}, nil
+func findNodeGroupByID(groups []nodeGroup, groupID int) (nodeGroup, error) {
+	for _, group := range groups {
+		if group.ID == groupID {
+			return group, nil
 		}
 	}
-	return nil, fmt.Errorf("node id %d not found in config", nodeID)
+	return nodeGroup{}, fmt.Errorf("node group %d not found in config", groupID)
 }
 
 func filterCoreConfigsForNode(coreConfigs []conf.CoreConfig, nodeConfig conf.NodeConfig) []conf.CoreConfig {
@@ -466,7 +498,7 @@ func filterCoreConfigsForNode(coreConfigs []conf.CoreConfig, nodeConfig conf.Nod
 	return coreConfigs
 }
 
-func prepareChildCoreConfigs(coreConfigs []conf.CoreConfig, nodeConfig conf.NodeConfig, nodeID int) ([]conf.CoreConfig, error) {
+func prepareChildCoreConfigs(coreConfigs []conf.CoreConfig, nodeConfig conf.NodeConfig, groupID int) ([]conf.CoreConfig, error) {
 	filtered := filterCoreConfigsForNode(coreConfigs, nodeConfig)
 	cloned := make([]conf.CoreConfig, len(filtered))
 	copy(cloned, filtered)
@@ -475,7 +507,7 @@ func prepareChildCoreConfigs(coreConfigs []conf.CoreConfig, nodeConfig conf.Node
 	if err != nil {
 		return nil, fmt.Errorf("resolve executable error: %w", err)
 	}
-	workDir := childWorkDir(executable, nodeID)
+	workDir := childWorkDir(executable, groupID)
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		return nil, fmt.Errorf("create child work dir error: %w", err)
 	}
@@ -489,7 +521,7 @@ func prepareChildCoreConfigs(coreConfigs []conf.CoreConfig, nodeConfig conf.Node
 		if singCopy.OriginalPath == "" {
 			continue
 		}
-		childPath, err := prepareChildSingConfig(singCopy.OriginalPath, workDir, nodeID)
+		childPath, err := prepareChildSingConfig(singCopy.OriginalPath, workDir, groupID)
 		if err != nil {
 			return nil, err
 		}
@@ -499,7 +531,7 @@ func prepareChildCoreConfigs(coreConfigs []conf.CoreConfig, nodeConfig conf.Node
 	return cloned, nil
 }
 
-func prepareChildSingConfig(originalPath, workDir string, nodeID int) (string, error) {
+func prepareChildSingConfig(originalPath, workDir string, groupID int) (string, error) {
 	data, err := os.ReadFile(originalPath)
 	if err != nil {
 		return "", fmt.Errorf("read sing original config error: %w", err)
@@ -515,7 +547,7 @@ func prepareChildSingConfig(originalPath, workDir string, nodeID int) (string, e
 	cacheFile["enabled"] = true
 	cacheFile["path"] = filepath.Join(workDir, "cache.db")
 
-	childPath := filepath.Join(workDir, fmt.Sprintf("sing_origin_%d.json", nodeID))
+	childPath := filepath.Join(workDir, fmt.Sprintf("sing_origin_group_%d.json", groupID))
 	content, err := json.MarshalIndent(root, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("marshal child sing config error: %w", err)
@@ -532,13 +564,15 @@ func formatNodeIDs(nodes []conf.NodeConfig) string {
 	}
 	ids := make([]string, 0, len(nodes))
 	for _, nodeConfig := range nodes {
-		ids = append(ids, strconv.Itoa(nodeConfig.ApiConfig.NodeID))
+		for _, nodeID := range nodeConfig.ApiConfig.GetNodeIDs() {
+			ids = append(ids, strconv.Itoa(nodeID))
+		}
 	}
 	return strings.Join(ids, ",")
 }
 
-func childWorkDir(executable string, nodeID int) string {
-	return filepath.Join(filepath.Dir(executable), fmt.Sprintf("node-%d", nodeID))
+func childWorkDir(executable string, groupID int) string {
+	return filepath.Join(filepath.Dir(executable), fmt.Sprintf("group-%d", groupID))
 }
 
 func getOrCreateMap(parent map[string]interface{}, key string) map[string]interface{} {
@@ -553,15 +587,15 @@ func getOrCreateMap(parent map[string]interface{}, key string) map[string]interf
 }
 
 func sendSignalToChildren(children map[int]*exec.Cmd, sig os.Signal) {
-	for nodeID, cmd := range children {
+	for groupID, cmd := range children {
 		if cmd == nil || cmd.Process == nil {
 			continue
 		}
 		if err := cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
 			log.WithFields(log.Fields{
-				"node_id": nodeID,
-				"pid":     cmd.Process.Pid,
-				"err":     err,
+				"group_id": groupID,
+				"pid":      cmd.Process.Pid,
+				"err":      err,
 			}).Warn("Signal child process failed")
 		}
 	}
