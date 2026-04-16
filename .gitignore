@@ -18,3 +18,4 @@ newV2bX.sh
 quic_singbox.sh
 build
 .gocache/*
+.cursor/*
