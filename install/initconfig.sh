@@ -121,9 +121,11 @@ add_node_config() {
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
             "EnableProxyProtocol": false,
+            "EnableDNS": true,
             "EnableUot": true,
             "EnableTFO": true,
             "DNSType": "UseIPv4",
+            "DisableSniffing": false,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
@@ -152,8 +154,9 @@ EOF
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
-            "TCPFastOpen": $fastopen,
-            "SniffEnabled": true,
+            "EnableTFO": $fastopen,
+            "EnableDNS": true,
+            "EnableSniff": true,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
@@ -258,6 +261,14 @@ generate_config_file() {
             \"Level\": \"error\",
             \"ErrorPath\": \"/etc/V2bX/error.log\"
         },
+        \"DnsConfigPath\": \"/etc/V2bX/dns.json\",
+        \"XrayConnectionConfig\": {
+            \"handshake\": 4,
+            \"connIdle\": 30,
+            \"uplinkOnly\": 2,
+            \"downlinkOnly\": 4,
+            \"bufferSize\": 32
+        },
         \"OutboundConfigPath\": \"/etc/V2bX/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/V2bX/route.json\"
     },"
@@ -323,7 +334,7 @@ EOF
         "tag": "IPv4_out",
         "protocol": "freedom",
         "settings": {
-            "domainStrategy": "UseIPv4v6"
+            "domainStrategy": "UseIPv4"
         }
     },
     {
@@ -406,6 +417,27 @@ EOF
     if [ "$ipv6_support" -eq 1 ]; then
         dnsstrategy="prefer_ipv4"
     fi
+    xray_query_strategy="UseIPv4"
+    if [ "$ipv6_support" -eq 1 ]; then
+        xray_query_strategy="UseIP"
+    fi
+    # 创建 dns.json 文件
+    cat <<EOF > /etc/V2bX/dns.json
+{
+    "servers": [
+        "localhost",
+        "https://1.1.1.1/dns-query",
+        "tcp-tls://1.1.1.1",
+        "tcp://1.1.1.1",
+        "1.1.1.1",
+        "https://8.8.8.8/dns-query",
+        "tcp://8.8.8.8",
+        "8.8.8.8"
+    ],
+    "queryStrategy": "$xray_query_strategy",
+    "tag": "dns_inbound"
+}
+EOF
     # 创建 sing_origin.json 文件
     cat <<EOF > /etc/V2bX/sing_origin.json
 {

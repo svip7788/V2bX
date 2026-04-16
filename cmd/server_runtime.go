@@ -289,15 +289,15 @@ func runMasterServer(c *conf.Conf, configPath string, enableWatch bool) error {
 	log.WithField("node_ids", formatNodeIDs(c.NodeConfig)).Info("V2bX master started")
 
 	if enableWatch {
-		xdns, sdns := detectMasterWatchPaths(c)
-		if err := c.Watch(configPath, xdns, sdns, func() {
+		watchPaths := detectWatchPaths(c)
+		if err := c.Watch(configPath, func() {
 			if err := manager.Replace(c); err != nil {
 				log.WithField("err", err).Error("Reload worker processes failed")
 				return
 			}
 			log.WithField("node_ids", formatNodeIDs(c.NodeConfig)).Info("Worker processes reloaded")
 			runtime.GC()
-		}); err != nil {
+		}, watchPaths...); err != nil {
 			return err
 		}
 	}
@@ -379,9 +379,8 @@ func runManagedNodeServer(c *conf.Conf, configPath string, enableWatch bool) err
 	log.Info("Nodes started")
 
 	if enableWatch {
-		xdns := os.Getenv("XRAY_DNS_PATH")
-		sdns := os.Getenv("SING_DNS_PATH")
-		if err := c.Watch(configPath, xdns, sdns, func() {
+		watchPaths := detectWatchPaths(c)
+		if err := c.Watch(configPath, func() {
 			nodes.Close()
 			if err := vc.Close(); err != nil {
 				log.WithField("err", err).Error("Restart node failed")
@@ -403,7 +402,7 @@ func runManagedNodeServer(c *conf.Conf, configPath string, enableWatch bool) err
 			}
 			log.Info("Nodes restarted")
 			runtime.GC()
-		}); err != nil {
+		}, watchPaths...); err != nil {
 			return err
 		}
 	}
@@ -413,13 +412,37 @@ func runManagedNodeServer(c *conf.Conf, configPath string, enableWatch bool) err
 	return nil
 }
 
-func detectMasterWatchPaths(c *conf.Conf) (string, string) {
+func detectWatchPaths(c *conf.Conf) []string {
+	paths := make([]string, 0, 4)
+	seen := make(map[string]struct{})
+	appendPath := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, ok := seen[path]; ok {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
 	for _, coreConfig := range c.CoresConfig {
-		if coreConfig.XrayConfig != nil && coreConfig.XrayConfig.DnsConfigPath != "" {
-			return coreConfig.XrayConfig.DnsConfigPath, ""
+		if coreConfig.XrayConfig == nil {
+			continue
+		}
+		if path, _ := coreConfig.XrayConfig.ResolveDNSConfigPath(); path != "" {
+			appendPath(path)
+		}
+		if path, _ := coreConfig.XrayConfig.ResolveInboundConfigPath(); path != "" {
+			appendPath(path)
+		}
+		if path, _ := coreConfig.XrayConfig.ResolveRouteConfigPath(); path != "" {
+			appendPath(path)
+		}
+		if path, _ := coreConfig.XrayConfig.ResolveOutboundConfigPath(); path != "" {
+			appendPath(path)
 		}
 	}
-	return "", ""
+	return paths
 }
 
 func collectNodeGroups(nodes []conf.NodeConfig) ([]nodeGroup, error) {

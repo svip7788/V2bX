@@ -1,13 +1,13 @@
 {
   "Log": {
-    "Level": "info",
+    "Level": "warning",
     "Output": ""
   },
   "Cores": [
     {
       "Type": "sing",
       "Log": {
-        "Level": "info",
+        "Level": "error",
         "Timestamp": true
       },
       "NTP": {
@@ -30,8 +30,8 @@
       "SendIP": "0.0.0.0",
       "DeviceOnlineMinTraffic": 200,
       "MinReportTraffic": 0,
-      "TCPFastOpen": false,
-      "SniffEnabled": true,
+      "EnableTFO": true,
+      "EnableSniff": true,
       "CertConfig": {
         "CertMode": "self",
         "RejectUnknownSni": false,

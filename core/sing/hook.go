@@ -19,7 +19,8 @@ import (
 var _ adapter.ConnectionTracker = (*HookServer)(nil)
 
 type HookServer struct {
-	counter sync.Map //map[string]*counter.TrafficCounter
+	counter      sync.Map // map[string]*counter.TrafficCounter
+	connManagers sync.Map // map[string]*userConnManager
 }
 
 func (h *HookServer) ModeList() []string {
@@ -55,6 +56,7 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	}
 	t := h.getCounter(m.Inbound)
 	conn = counter.NewConnCounter(conn, t.GetCounter(m.User))
+	conn = newTrackedConn(conn, h.getConnManager(taguuid))
 	return conn
 }
 
@@ -66,6 +68,40 @@ func (h *HookServer) getCounter(tag string) *counter.TrafficCounter {
 	return c.(*counter.TrafficCounter)
 }
 
+func (h *HookServer) getConnManager(taguuid string) *userConnManager {
+	if m, ok := h.connManagers.Load(taguuid); ok {
+		return m.(*userConnManager)
+	}
+	manager := &userConnManager{}
+	manager.markOwner(taguuid, &h.connManagers)
+	actual, _ := h.connManagers.LoadOrStore(taguuid, manager)
+	return actual.(*userConnManager)
+}
+
+func (h *HookServer) closeUserConnections(taguuid string) {
+	if m, ok := h.connManagers.Load(taguuid); ok {
+		manager := m.(*userConnManager)
+		manager.CloseAll()
+		h.connManagers.Delete(taguuid)
+	}
+}
+
+func (h *HookServer) closeTagConnections(tag string) {
+	prefix := tag + "|"
+	h.connManagers.Range(func(key, value interface{}) bool {
+		taguuid, ok := key.(string)
+		if !ok {
+			return true
+		}
+		if len(taguuid) >= len(prefix) && taguuid[:len(prefix)] == prefix {
+			manager := value.(*userConnManager)
+			manager.CloseAll()
+			h.connManagers.Delete(key)
+		}
+		return true
+	})
+}
+
 func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
@@ -75,10 +111,12 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 	}
 	ip := m.Source.Addr.String()
 	taguuid := format.UserTag(m.Inbound, m.User)
-	if _, r := l.CheckLimit(taguuid, ip, false, false); r {
+	if b, r := l.CheckLimit(taguuid, ip, false, false); r {
 		conn.Close()
 		log.Info("[", m.Inbound, "] ", "Limited ", m.User, " by ip or conn")
 		return conn
+	} else if b != nil {
+		conn = rate.NewPacketConnRateLimiter(conn, b)
 	}
 	destStr := m.Destination.AddrString()
 	if l.CheckDomainRule(destStr) {
@@ -93,5 +131,6 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 	}
 	t := h.getCounter(m.Inbound)
 	conn = counter.NewPacketConnCounter(conn, t.GetCounter(m.User))
+	conn = newTrackedPacketConn(conn, h.getConnManager(taguuid))
 	return conn
 }

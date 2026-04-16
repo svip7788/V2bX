@@ -1,6 +1,8 @@
 package conf
 
 import (
+	"encoding/json"
+
 	"github.com/sagernet/sing-box/option"
 )
 
@@ -79,4 +81,29 @@ func NewSingOptions() *SingOptions {
 		FallBackConfigs:          &FallBackConfigForSing{},
 		Multiplex:                &MultiplexConfig{},
 	}
+}
+
+func (o *SingOptions) UnmarshalJSON(data []byte) error {
+	type alias SingOptions
+	if err := json.Unmarshal(data, (*alias)(o)); err != nil {
+		return err
+	}
+
+	raw := struct {
+		EnableTFO    *bool `json:"EnableTFO"`
+		TCPFastOpen  *bool `json:"TCPFastOpen"`
+		EnableSniff  *bool `json:"EnableSniff"`
+		SniffEnabled *bool `json:"SniffEnabled"`
+	}{}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	if raw.EnableTFO == nil && raw.TCPFastOpen != nil {
+		o.TCPFastOpen = *raw.TCPFastOpen
+	}
+	if raw.EnableSniff == nil && raw.SniffEnabled != nil {
+		o.SniffEnabled = *raw.SniffEnabled
+	}
+	return nil
 }

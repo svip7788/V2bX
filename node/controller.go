@@ -239,41 +239,12 @@ func (c *Controller) processWSEvent(evt panel.WSEvent) {
 }
 
 func (c *Controller) applyFullUsers(newUsers []panel.UserInfo) {
-	deleted, added := compareUserList(c.userList, newUsers)
-	if len(deleted) > 0 {
-		if err := c.server.DelUsers(deleted, c.tag, c.info); err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("WS: delete users failed")
-			return
-		}
+	if err := c.syncUsersLocked(newUsers, "WS"); err != nil {
+		log.WithFields(log.Fields{
+			"tag": c.tag,
+			"err": err,
+		}).Error("WS: sync users failed")
 	}
-	if len(added) > 0 {
-		if _, err := c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			NodeInfo: c.info,
-			Users:    added,
-		}); err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("WS: add users failed")
-			return
-		}
-	}
-	if len(added) > 0 || len(deleted) > 0 {
-		c.limiter.UpdateUser(c.tag, added, deleted)
-		if c.LimitConfig.EnableDynamicSpeedLimit {
-			for i := range deleted {
-				delete(c.traffic, deleted[i].Uuid)
-			}
-		}
-		log.WithField("tag", c.tag).
-			Infof("WS: %d user deleted, %d user added", len(deleted), len(added))
-	}
-	c.userList = newUsers
-	c.rebuildUIDToUUID()
 }
 
 func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
@@ -295,55 +266,97 @@ func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
 		if len(newUsers) == 0 {
 			return
 		}
-		if _, err := c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			NodeInfo: c.info,
-			Users:    newUsers,
-		}); err != nil {
+		if err := c.applyUserChangesLocked(newUsers, nil); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Error("WS: delta add users failed")
+			}).Error("WS: add users failed")
 			return
 		}
-		c.limiter.UpdateUser(c.tag, newUsers, nil)
-		c.userList = append(c.userList, newUsers...)
-		for i := range newUsers {
-			c.uidToUUID[newUsers[i].Id] = newUsers[i].Uuid
-		}
+		c.userList = append(cloneUserList(c.userList), newUsers...)
+		c.rebuildUIDToUUID()
 		log.WithField("tag", c.tag).Infof("WS: delta added %d users", len(newUsers))
 
 	case "remove":
 		if len(users) == 0 {
 			return
 		}
-		if err := c.server.DelUsers(users, c.tag, c.info); err != nil {
+		if err := c.applyUserChangesLocked(nil, users); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Error("WS: delta remove users failed")
+			}).Error("WS: remove users failed")
 			return
 		}
-		c.limiter.UpdateUser(c.tag, nil, users)
 		removeSet := make(map[string]struct{}, len(users))
 		for _, u := range users {
 			removeSet[u.Uuid] = struct{}{}
-			if c.LimitConfig.EnableDynamicSpeedLimit {
-				delete(c.traffic, u.Uuid)
-			}
 		}
-		filtered := c.userList[:0]
+		filtered := make([]panel.UserInfo, 0, len(c.userList))
 		for _, u := range c.userList {
 			if _, rm := removeSet[u.Uuid]; !rm {
 				filtered = append(filtered, u)
 			}
 		}
 		c.userList = filtered
-		for _, u := range users {
-			delete(c.uidToUUID, u.Id)
-		}
+		c.rebuildUIDToUUID()
 		log.WithField("tag", c.tag).Infof("WS: delta removed %d users", len(users))
 	}
+}
+
+func cloneUserList(users []panel.UserInfo) []panel.UserInfo {
+	if len(users) == 0 {
+		return nil
+	}
+	cloned := make([]panel.UserInfo, len(users))
+	copy(cloned, users)
+	return cloned
+}
+
+func (c *Controller) clearDynamicTrafficLocked(users []panel.UserInfo) {
+	if !c.LimitConfig.EnableDynamicSpeedLimit || len(users) == 0 {
+		return
+	}
+	for i := range users {
+		delete(c.traffic, users[i].Uuid)
+	}
+}
+
+func (c *Controller) applyUserChangesLocked(added, deleted []panel.UserInfo) error {
+	if len(deleted) > 0 {
+		if err := c.server.DelUsers(deleted, c.tag, c.info); err != nil {
+			return fmt.Errorf("delete users error: %w", err)
+		}
+	}
+	if len(added) > 0 {
+		if _, err := c.server.AddUsers(&vCore.AddUsersParams{
+			Tag:      c.tag,
+			NodeInfo: c.info,
+			Users:    added,
+		}); err != nil {
+			return fmt.Errorf("add users error: %w", err)
+		}
+	}
+	if len(added) > 0 || len(deleted) > 0 {
+		c.limiter.UpdateUser(c.tag, added, deleted)
+		c.clearDynamicTrafficLocked(deleted)
+	}
+	return nil
+}
+
+func (c *Controller) syncUsersLocked(newUsers []panel.UserInfo, source string) error {
+	nextUsers := cloneUserList(newUsers)
+	deleted, added := compareUserList(c.userList, nextUsers)
+	if err := c.applyUserChangesLocked(added, deleted); err != nil {
+		return err
+	}
+	c.userList = nextUsers
+	c.rebuildUIDToUUID()
+	if len(added) > 0 || len(deleted) > 0 {
+		log.WithField("tag", c.tag).
+			Infof("%s: %d user deleted, %d user added", source, len(deleted), len(added))
+	}
+	return nil
 }
 
 func (c *Controller) applyPanelCertConfig(node *panel.NodeInfo) {

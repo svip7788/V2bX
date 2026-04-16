@@ -17,18 +17,23 @@ import (
 // Panel is the interface for different panel's api.
 
 type Client struct {
-	client           *resty.Client
-	APIHost          string
-	APISendIP        string
-	Token            string
-	NodeType         string
-	NodeId           int
-	nodeEtag         string
-	userEtag         string
-	responseBodyHash string
-	UserList         *UserListBody
-	AliveMap         *AliveMap
+	client                    *resty.Client
+	APIHost                   string
+	APISendIP                 string
+	Token                     string
+	NodeType                  string
+	NodeId                    int
+	nodeEtag                  string
+	userEtag                  string
+	responseBodyHash          string
+	UserList                  *UserListBody
+	AliveMap                  *AliveMap
+	nowFunc                   func() time.Time
+	userListForceRefreshAfter time.Duration
+	lastUserListFullFetchAt   time.Time
 }
+
+const defaultUserListForceRefreshAfter = 5 * time.Minute
 
 func New(c *conf.ApiConfig) (*Client, error) {
 	var client *resty.Client
@@ -36,7 +41,7 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		client = resty.NewWithLocalAddr(&net.TCPAddr{
 			IP: net.ParseIP(c.APISendIP),
 		})
-	} else {	
+	} else {
 		client = resty.New()
 	}
 	client.SetRetryCount(3)
@@ -87,4 +92,18 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		UserList:  &UserListBody{},
 		AliveMap:  &AliveMap{},
 	}, nil
+}
+
+func (c *Client) now() time.Time {
+	if c.nowFunc != nil {
+		return c.nowFunc()
+	}
+	return time.Now()
+}
+
+func (c *Client) userListRefreshInterval() time.Duration {
+	if c.userListForceRefreshAfter > 0 {
+		return c.userListForceRefreshAfter
+	}
+	return defaultUserListForceRefreshAfter
 }

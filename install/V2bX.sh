@@ -533,9 +533,11 @@ add_node_config() {
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
             "EnableProxyProtocol": false,
+            "EnableDNS": true,
             "EnableUot": true,
             "EnableTFO": true,
             "DNSType": "UseIPv4",
+            "DisableSniffing": false,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
@@ -564,8 +566,9 @@ EOF
             "SendIP": "0.0.0.0",
             "DeviceOnlineMinTraffic": 200,
             "MinReportTraffic": 0,
-            "TCPFastOpen": $fastopen,
-            "SniffEnabled": true,
+            "EnableTFO": $fastopen,
+            "EnableDNS": true,
+            "EnableSniff": true,
             "CertConfig": {
                 "CertMode": "$certmode",
                 "RejectUnknownSni": false,
@@ -669,6 +672,14 @@ generate_config_file() {
             \"Level\": \"error\",
             \"ErrorPath\": \"/etc/V2bX/error.log\"
         },
+        \"DnsConfigPath\": \"/etc/V2bX/dns.json\",
+        \"XrayConnectionConfig\": {
+            \"handshake\": 4,
+            \"connIdle\": 30,
+            \"uplinkOnly\": 2,
+            \"downlinkOnly\": 4,
+            \"bufferSize\": 32
+        },
         \"OutboundConfigPath\": \"/etc/V2bX/custom_outbound.json\",
         \"RouteConfigPath\": \"/etc/V2bX/route.json\"
     },"
@@ -734,7 +745,7 @@ EOF
             "tag": "IPv4_out",
             "protocol": "freedom",
             "settings": {
-                "domainStrategy": "UseIPv4v6"
+                "domainStrategy": "UseIPv4"
             }
         },
         {
@@ -818,6 +829,27 @@ EOF
     if [ "$ipv6_support" -eq 1 ]; then
         dnsstrategy="prefer_ipv4"
     fi
+    xray_query_strategy="UseIPv4"
+    if [ "$ipv6_support" -eq 1 ]; then
+        xray_query_strategy="UseIP"
+    fi
+    # 创建 dns.json 文件
+    cat <<EOF > /etc/V2bX/dns.json
+{
+  "servers": [
+    "localhost",
+    "https://1.1.1.1/dns-query",
+    "tcp-tls://1.1.1.1",
+    "tcp://1.1.1.1",
+    "1.1.1.1",
+    "https://8.8.8.8/dns-query",
+    "tcp://8.8.8.8",
+    "8.8.8.8"
+  ],
+  "queryStrategy": "$xray_query_strategy",
+  "tag": "dns_inbound"
+}
+EOF
     # 创建 sing_origin.json 文件
     cat <<EOF > /etc/V2bX/sing_origin.json
 {
@@ -938,6 +970,29 @@ open_ports() {
     echo -e "${green}放开防火墙端口成功！${plain}"
 }
 
+apply_performance_tuning() {
+    if [[ ! -f /etc/sysctl.d/99-v2bx-performance.conf ]]; then
+        echo -e "${red}未找到 /etc/sysctl.d/99-v2bx-performance.conf${plain}"
+        return 1
+    fi
+    sysctl --system
+}
+
+capture_pprof() {
+    local listen_addr="$2"
+    local seconds="${3:-20}"
+    local output_dir="${4:-/tmp/v2bx-pprof-$(date +%Y%m%d-%H%M%S)}"
+    if [[ -z "${listen_addr}" ]]; then
+        echo -e "${red}用法: V2bX pprof <listen_addr> [seconds] [output_dir]${plain}"
+        return 1
+    fi
+    if [[ ! -x /usr/local/V2bX/collect_pprof.sh ]]; then
+        echo -e "${red}未找到 /usr/local/V2bX/collect_pprof.sh${plain}"
+        return 1
+    fi
+    /usr/local/V2bX/collect_pprof.sh "${listen_addr}" "${seconds}" "${output_dir}"
+}
+
 show_usage() {
     echo "V2bX 管理脚本使用方法: "
     echo "------------------------------------------"
@@ -955,6 +1010,8 @@ show_usage() {
     echo "V2bX update x.x.x - 安装 V2bX 指定版本"
     echo "V2bX install      - 安装 V2bX"
     echo "V2bX uninstall    - 卸载 V2bX"
+    echo "V2bX tune         - 重载高并发内核参数"
+    echo "V2bX pprof        - 抓取运行中实例的 pprof"
     echo "V2bX version      - 查看 V2bX 版本"
     echo "------------------------------------------"
 }
@@ -1028,6 +1085,8 @@ if [[ $# > 0 ]]; then
         "generate") generate_config_file ;;
         "install") check_uninstall 0 && install 0 ;;
         "uninstall") check_install 0 && uninstall 0 ;;
+        "tune") apply_performance_tuning ;;
+        "pprof") capture_pprof "$@" ;;
         "x25519") check_install 0 && generate_x25519_key 0 ;;
         "version") check_install 0 && show_V2bX_version 0 ;;
         "update_shell") update_shell ;;

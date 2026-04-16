@@ -133,6 +133,33 @@ func (x *Xray) RestoreUserTraffic(tag string, trafficSlice []panel.UserTraffic) 
 	return nil
 }
 
+func (x *Xray) CommitUserTraffic(tag string, trafficSlice []panel.UserTraffic) error {
+	if len(trafficSlice) == 0 {
+		return nil
+	}
+	v, ok := x.dispatcher.Counter.Load(tag)
+	if !ok {
+		return nil
+	}
+	c := v.(*counter.TrafficCounter)
+	x.users.mapLock.RLock()
+	uidToUser := make(map[int]string, len(x.users.uidMap))
+	for user, uid := range x.users.uidMap {
+		uidToUser[uid] = user
+	}
+	x.users.mapLock.RUnlock()
+	for i := range trafficSlice {
+		user, found := uidToUser[trafficSlice[i].UID]
+		if !found {
+			continue
+		}
+		storage := c.GetCounter(user)
+		storage.UpCounter.Add(-trafficSlice[i].Upload)
+		storage.DownCounter.Add(-trafficSlice[i].Download)
+	}
+	return nil
+}
+
 func (c *Xray) AddUsers(p *vCore.AddUsersParams) (added int, err error) {
 	var users []*protocol.User
 	switch p.NodeInfo.Type {

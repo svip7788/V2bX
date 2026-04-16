@@ -33,11 +33,14 @@ type AliveMap struct {
 // GetUserList will pull user from v2board
 func (c *Client) GetUserList() ([]UserInfo, error) {
 	const path = "/api/v1/server/UniProxy/user"
-	r, err := c.client.R().
-		SetHeader("If-None-Match", c.userEtag).
+	req := c.client.R().
 		SetHeader("X-Response-Format", "msgpack").
-		SetDoNotParseResponse(true).
-		Get(path)
+		SetDoNotParseResponse(true)
+	if c.userEtag != "" && !c.lastUserListFullFetchAt.IsZero() &&
+		c.now().Sub(c.lastUserListFullFetchAt) < c.userListRefreshInterval() {
+		req.SetHeader("If-None-Match", c.userEtag)
+	}
+	r, err := req.Get(path)
 	if r == nil || r.RawResponse == nil {
 		return nil, fmt.Errorf("received nil response or raw response")
 	}
@@ -87,6 +90,8 @@ func (c *Client) GetUserList() ([]UserInfo, error) {
 		}
 	}
 	c.userEtag = r.Header().Get("ETag")
+	c.lastUserListFullFetchAt = c.now()
+	c.UserList = userlist
 	return userlist.Users, nil
 }
 

@@ -178,6 +178,10 @@ command_background="yes"
 depend() {
         need net
 }
+
+start_pre() {
+        ulimit -n 999999
+}
 EOF
         chmod +x /etc/init.d/V2bX
         rc-update add V2bX default
@@ -197,7 +201,9 @@ Type=simple
 LimitAS=infinity
 LimitRSS=infinity
 LimitCORE=infinity
+LimitNPROC=infinity
 LimitNOFILE=999999
+TasksMax=infinity
 WorkingDirectory=/usr/local/V2bX/
 ExecStart=/usr/local/V2bX/V2bX server
 Restart=always
@@ -246,6 +252,13 @@ EOF
     if [[ ! -f /etc/V2bX/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/V2bX/
     fi
+    mkdir -p /etc/sysctl.d
+    if [[ ! -f /etc/sysctl.d/99-v2bx-performance.conf ]]; then
+        cp 99-v2bx-performance.conf /etc/sysctl.d/99-v2bx-performance.conf
+    fi
+    sysctl --system >/dev/null 2>&1 || true
+    cp collect_pprof.sh /usr/local/V2bX/collect_pprof.sh
+    chmod +x /usr/local/V2bX/collect_pprof.sh
     curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/V2bX.sh
     chmod +x /usr/bin/V2bX
     if [ ! -L /usr/bin/v2bx ]; then

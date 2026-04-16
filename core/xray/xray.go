@@ -70,6 +70,18 @@ func parseConnectionConfig(c *conf.XrayConnectionConfig) (policy *coreConf.Polic
 
 func getCore(c *conf.XrayConfig) *core.Instance {
 	os.Setenv("XRAY_LOCATION_ASSET", c.AssetPath)
+	dnsConfigPath, dnsAutoDiscovered := c.ResolveDNSConfigPath()
+	routeConfigPath, routeAutoDiscovered := c.ResolveRouteConfigPath()
+	outboundConfigPath, outboundAutoDiscovered := c.ResolveOutboundConfigPath()
+	if dnsAutoDiscovered {
+		log.WithField("path", dnsConfigPath).Info("Auto-discovered Xray DNS config")
+	}
+	if routeAutoDiscovered {
+		log.WithField("path", routeConfigPath).Info("Auto-discovered Xray route config")
+	}
+	if outboundAutoDiscovered {
+		log.WithField("path", outboundConfigPath).Info("Auto-discovered Xray outbound config")
+	}
 	// Log Config
 	coreLogConfig := &coreConf.LogConfig{
 		LogLevel:  c.LogConfig.Level,
@@ -79,8 +91,8 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 	// DNS config
 	coreDnsConfig := &coreConf.DNSConfig{}
 	os.Setenv("XRAY_DNS_PATH", "")
-	if c.DnsConfigPath != "" {
-		data, err := os.ReadFile(c.DnsConfigPath)
+	if dnsConfigPath != "" {
+		data, err := os.ReadFile(dnsConfigPath)
 		if err != nil {
 			log.Error(fmt.Sprintf("Failed to read xray dns config file: %v", err))
 			coreDnsConfig = &coreConf.DNSConfig{}
@@ -90,11 +102,11 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 				coreDnsConfig = &coreConf.DNSConfig{}
 			}
 		}
-		os.Setenv("XRAY_DNS_PATH", c.DnsConfigPath)
+		os.Setenv("XRAY_DNS_PATH", dnsConfigPath)
 	}
 	if len(coreDnsConfig.Servers) == 0 {
 		coreDnsConfig.Servers = defaultDNSServers()
-		log.Info("No custom DNS configured, using built-in defaults (DoH + DoT + UDP)")
+		log.Info("No custom DNS configured, using built-in defaults (local + public upstreams)")
 	}
 	if coreDnsConfig.QueryStrategy == "" && !hasPublicIPv6() {
 		coreDnsConfig.QueryStrategy = "UseIPv4"
@@ -106,8 +118,8 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 	}
 	// Routing config
 	coreRouterConfig := &coreConf.RouterConfig{}
-	if c.RouteConfigPath != "" {
-		data, err := os.ReadFile(c.RouteConfigPath)
+	if routeConfigPath != "" {
+		data, err := os.ReadFile(routeConfigPath)
 		if err != nil {
 			log.WithField("err", err).Panic("Failed to read Routing config file")
 		} else {
@@ -142,8 +154,8 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 	}
 	// Custom Outbound config
 	var coreCustomOutboundConfig []coreConf.OutboundDetourConfig
-	if c.OutboundConfigPath != "" {
-		data, err := os.ReadFile(c.OutboundConfigPath)
+	if outboundConfigPath != "" {
+		data, err := os.ReadFile(outboundConfigPath)
 		if err != nil {
 			log.WithField("err", err).Panic("Failed to read Custom Outbound config file")
 		} else {
@@ -234,10 +246,12 @@ func (c *Xray) Type() string {
 
 func defaultDNSServers() []*coreConf.NameServerConfig {
 	addresses := []string{
-		"https://dns.google/dns-query",
+		"localhost",
+		"https://1.1.1.1/dns-query",
+		"tcp-tls://1.1.1.1",
+		"tcp://1.1.1.1",
+		"1.1.1.1",
 		"https://8.8.8.8/dns-query",
-		"tcp-tls://dns.google",
-		"tcp-tls://8.8.8.8",
 		"tcp://8.8.8.8",
 		"8.8.8.8",
 	}

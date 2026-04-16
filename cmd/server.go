@@ -10,6 +10,7 @@ var (
 	config          string
 	watch           bool
 	childGroupIndex int
+	pprofListen     string
 )
 
 var serverCommand = cobra.Command{
@@ -26,6 +27,9 @@ func init() {
 	serverCommand.PersistentFlags().
 		BoolVarP(&watch, "watch", "w",
 			true, "watch file path change")
+	serverCommand.PersistentFlags().
+		StringVar(&pprofListen, "pprof-listen", "",
+			"temporary pprof listen address")
 	serverCommand.Flags().
 		IntVar(&childGroupIndex, "child-node-group", 0, "internal child node group")
 	_ = serverCommand.Flags().MarkHidden("child-node-group")
@@ -42,6 +46,7 @@ func serverHandle(_ *cobra.Command, _ []string) {
 		log.WithField("err", err).Error("Load config file failed")
 		return
 	}
+	applyServerRuntimeOverrides(c)
 
 	cleanup, err := configureServerLogging(c)
 	if err != nil {
@@ -61,5 +66,11 @@ func serverHandle(_ *cobra.Command, _ []string) {
 
 	if err := runMasterServer(c, config, watch); err != nil {
 		log.WithField("err", err).Error("Run master server failed")
+	}
+}
+
+func applyServerRuntimeOverrides(c *conf.Conf) {
+	if pprofListen != "" {
+		c.LogConfig.PprofListen = pprofListen
 	}
 }

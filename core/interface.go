@@ -18,6 +18,7 @@ type Core interface {
 	DelNode(tag string) error
 	AddUsers(p *AddUsersParams) (added int, err error)
 	GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic, error)
+	CommitUserTraffic(tag string, traffic []panel.UserTraffic) error
 	RestoreUserTraffic(tag string, traffic []panel.UserTraffic) error
 	DelUsers(users []panel.UserInfo, tag string, info *panel.NodeInfo) error
 	Protocols() []string

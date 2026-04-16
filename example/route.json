@@ -1,5 +1,5 @@
 {
-    "domainStrategy": "IPOnDemand",
+    "domainStrategy": "AsIs",
     "rules": [
         {
             "type": "field",
@@ -11,20 +11,19 @@
         {
             "type": "field",
             "outboundTag": "block",
-            "protocol": [
-                "bittorrent"
+            "ip": [
+                "127.0.0.1/32",
+                "10.0.0.0/8",
+                "fc00::/7",
+                "fe80::/10",
+                "172.16.0.0/12"
             ]
         },
         {
             "type": "field",
-            "outboundTag": "socks5-warp",
-            "domain": [""]
-        },
-        {
-            "type": "field",
-            "outboundTag": "IPv6_out",
-            "domain": [
-                "geosite:netflix"
+            "outboundTag": "block",
+            "protocol": [
+                "bittorrent"
             ]
         },
         {

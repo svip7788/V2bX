@@ -16,7 +16,7 @@ func TestConf_LoadFromPath(t *testing.T) {
 
 func TestConf_Watch_ReturnsErrorForMissingFile(t *testing.T) {
 	c := New()
-	if err := c.Watch("./not-exist.json", "", "", func() {}); err == nil {
+	if err := c.Watch("./not-exist.json", func() {}); err == nil {
 		t.Fatal("expected watch error for missing file")
 	}
 }

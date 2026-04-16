@@ -1,12 +1,14 @@
 {
     "servers": [
-        "https://dns.google/dns-query",
+        "localhost",
+        "https://1.1.1.1/dns-query",
+        "tcp-tls://1.1.1.1",
+        "tcp://1.1.1.1",
+        "1.1.1.1",
         "https://8.8.8.8/dns-query",
-        "tcp-tls://dns.google",
-        "tcp-tls://8.8.8.8",
         "tcp://8.8.8.8",
-        "8.8.8.8",
-        "localhost"
+        "8.8.8.8"
     ],
+    "queryStrategy": "UseIPv4",
     "tag": "dns_inbound"
 }

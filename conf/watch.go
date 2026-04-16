@@ -10,7 +10,16 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
-func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) error {
+func (p *Conf) Watch(filePath string, reload func(), watchPaths ...string) error {
+	watchedNames := make(map[string]struct{}, len(watchPaths))
+	uniqueWatchPaths := make(map[string]struct{}, len(watchPaths))
+	for _, watchPath := range watchPaths {
+		if watchPath == "" {
+			continue
+		}
+		uniqueWatchPaths[watchPath] = struct{}{}
+		watchedNames[filepath.Base(watchPath)] = struct{}{}
+	}
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return fmt.Errorf("new watcher error: %s", err)
@@ -30,10 +39,10 @@ func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) 
 				pre = time.Now()
 				go func() {
 					time.Sleep(5 * time.Second)
-					switch filepath.Base(strings.TrimSuffix(e.Name, "~")) {
-					case filepath.Base(xDnsPath), filepath.Base(sDnsPath):
-						log.Println("DNS file changed, reloading...")
-					default:
+					name := filepath.Base(strings.TrimSuffix(e.Name, "~"))
+					if _, ok := watchedNames[name]; ok {
+						log.Printf("watched file %s changed, reloading...", name)
+					} else {
 						log.Println("config file changed, reloading...")
 					}
 					next := New()
@@ -57,16 +66,10 @@ func (p *Conf) Watch(filePath, xDnsPath string, sDnsPath string, reload func()) 
 	if err != nil {
 		return fmt.Errorf("watch file error: %s", err)
 	}
-	if xDnsPath != "" {
-		err = watcher.Add(xDnsPath)
+	for watchPath := range uniqueWatchPaths {
+		err = watcher.Add(watchPath)
 		if err != nil {
-			return fmt.Errorf("watch dns file error: %s", err)
-		}
-	}
-	if sDnsPath != "" {
-		err = watcher.Add(sDnsPath)
-		if err != nil {
-			return fmt.Errorf("watch dns file error: %s", err)
+			return fmt.Errorf("watch extra file error (%s): %s", watchPath, err)
 		}
 	}
 	return nil

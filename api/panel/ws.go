@@ -51,6 +51,15 @@ type WSClient struct {
 	nodeType string
 }
 
+func (ws *WSClient) queueEvent(evt WSEvent) {
+	select {
+	case ws.eventCh <- evt:
+	default:
+		ws.dropped.Store(true)
+		log.Warn("WS event channel full, dropping event: ", evt.Event)
+	}
+}
+
 type HandshakeResponse struct {
 	Websocket struct {
 		Enabled bool   `json:"enabled"`
@@ -175,12 +184,7 @@ func (ws *WSClient) readLoop() {
 			continue
 		}
 
-		select {
-		case ws.eventCh <- evt:
-		default:
-			ws.dropped.Store(true)
-			log.Warn("WS event channel full, dropping event: ", evt.Event)
-		}
+		ws.queueEvent(evt)
 	}
 }
 
@@ -213,6 +217,7 @@ func (ws *WSClient) reconnectLoop(wsURL string) {
 			}
 		} else {
 			log.Info("WS reconnected")
+			ws.queueEvent(WSEvent{Event: "sync.config"})
 			backoff = 2 * time.Second
 		}
 	}

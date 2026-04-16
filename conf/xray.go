@@ -1,5 +1,10 @@
 package conf
 
+import (
+	"os"
+	"path/filepath"
+)
+
 type XrayConfig struct {
 	LogConfig          *XrayLogConfig        `json:"Log"`
 	AssetPath          string                `json:"AssetPath"`
@@ -41,7 +46,7 @@ func NewXrayConfig() *XrayConfig {
 			ConnIdle:     30,
 			UplinkOnly:   2,
 			DownlinkOnly: 4,
-			BufferSize:   64,
+			BufferSize:   32,
 		},
 	}
 }
@@ -77,4 +82,38 @@ func NewXrayOptions() *XrayOptions {
 		DisableSniffing:     false,
 		EnableFallback:      false,
 	}
+}
+
+func (c *XrayConfig) ResolveDNSConfigPath() (string, bool) {
+	return c.resolveOptionalConfigPath(c.DnsConfigPath, "dns.json")
+}
+
+func (c *XrayConfig) ResolveInboundConfigPath() (string, bool) {
+	if c.InboundConfigPath == "" {
+		return "", false
+	}
+	return c.InboundConfigPath, false
+}
+
+func (c *XrayConfig) ResolveRouteConfigPath() (string, bool) {
+	return c.resolveOptionalConfigPath(c.RouteConfigPath, "route.json")
+}
+
+func (c *XrayConfig) ResolveOutboundConfigPath() (string, bool) {
+	return c.resolveOptionalConfigPath(c.OutboundConfigPath, "custom_outbound.json")
+}
+
+func (c *XrayConfig) resolveOptionalConfigPath(configPath string, defaultName string) (string, bool) {
+	if configPath != "" {
+		return configPath, false
+	}
+	if c.AssetPath == "" {
+		return "", false
+	}
+	candidate := filepath.Join(c.AssetPath, defaultName)
+	info, err := os.Stat(candidate)
+	if err != nil || info.IsDir() {
+		return "", false
+	}
+	return candidate, true
 }

@@ -7,9 +7,9 @@ import (
 )
 
 func (l *Limiter) CheckDomainRule(destination string) (reject bool) {
-	l.mu.RLock()
+	l.ruleMu.RLock()
 	rules := l.DomainRules
-	l.mu.RUnlock()
+	l.ruleMu.RUnlock()
 	for i := range rules {
 		if rules[i].MatchString(destination) {
 			reject = true
@@ -20,9 +20,9 @@ func (l *Limiter) CheckDomainRule(destination string) (reject bool) {
 }
 
 func (l *Limiter) CheckProtocolRule(protocol string) (reject bool) {
-	l.mu.RLock()
+	l.ruleMu.RLock()
 	rules := l.ProtocolRules
-	l.mu.RUnlock()
+	l.ruleMu.RUnlock()
 	for i := range rules {
 		if rules[i] == protocol {
 			reject = true
@@ -41,9 +41,9 @@ func (l *Limiter) UpdateRule(rule *panel.Rules) error {
 		}
 		rules = append(rules, r)
 	}
-	l.mu.Lock()
+	l.ruleMu.Lock()
 	l.DomainRules = rules
 	l.ProtocolRules = rule.Protocol
-	l.mu.Unlock()
+	l.ruleMu.Unlock()
 	return nil
 }

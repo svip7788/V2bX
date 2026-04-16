@@ -435,6 +435,7 @@ func (b *Sing) DelNode(tag string) error {
 	if err != nil {
 		return fmt.Errorf("delete inbound error: %s", err)
 	}
+	b.hookServer.closeTagConnections(tag)
 	b.hookServer.counter.Delete(tag)
 	b.nodeReportMinTrafficBytes.Delete(tag)
 	return nil

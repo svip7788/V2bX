@@ -90,12 +90,14 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		newA = nil
 	}
 	if newN != nil {
-		c.info = newN
-		// nodeInfo changed
+		oldUsers := cloneUserList(c.userList)
+		nextUsers := c.userList
 		if newU != nil {
-			c.userList = newU
-			c.rebuildUIDToUUID()
+			nextUsers = cloneUserList(newU)
 		}
+		c.info = newN
+		c.userList = nextUsers
+		c.rebuildUIDToUUID()
 		c.traffic = make(map[string]int64)
 		// Remove old node
 		log.WithField("tag", c.tag).Info("Node changed, reload")
@@ -120,7 +122,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			l := limiter.AddLimiter(c.tag, &c.LimitConfig, c.userList, aliveList)
 			c.limiter = l
 		} else if newU != nil {
-			deleted, added := compareUserList(c.userList, newU)
+			deleted, added := compareUserList(oldUsers, nextUsers)
 			if len(added) > 0 || len(deleted) > 0 {
 				c.limiter.UpdateUser(c.tag, added, deleted)
 			}
@@ -197,42 +199,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	if newU == nil {
 		return nil
 	}
-	deleted, added := compareUserList(c.userList, newU)
-	if len(deleted) > 0 {
-		if err = c.server.DelUsers(deleted, c.tag, c.info); err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("Delete users failed")
-			return nil
-		}
-	}
-	if len(added) > 0 {
-		if _, err = c.server.AddUsers(&vCore.AddUsersParams{
-			Tag:      c.tag,
-			NodeInfo: c.info,
-			Users:    added,
-		}); err != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": err,
-			}).Error("Add users failed")
-			return nil
-		}
-	}
-	if len(added) > 0 || len(deleted) > 0 {
-		c.limiter.UpdateUser(c.tag, added, deleted)
-		if c.LimitConfig.EnableDynamicSpeedLimit {
-			for i := range deleted {
-				delete(c.traffic, deleted[i].Uuid)
-			}
-		}
-	}
-	c.userList = newU
-	if len(added)+len(deleted) != 0 {
-		c.rebuildUIDToUUID()
-		log.WithField("tag", c.tag).
-			Infof("%d user deleted, %d user added", len(deleted), len(added))
+	if err := c.syncUsersLocked(newU, "Poll"); err != nil {
+		log.WithFields(log.Fields{
+			"tag": c.tag,
+			"err": err,
+		}).Error("Sync users failed")
 	}
 	return nil
 }

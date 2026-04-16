@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/InazumaV/V2bX/conf"
@@ -43,5 +45,35 @@ func TestCollectNodeGroupsByObject(t *testing.T) {
 	}
 	if got := formatNodeIDs(groups[1].Nodes); got != "2201" {
 		t.Fatalf("unexpected second group node ids: %s", got)
+	}
+}
+
+func TestDetectWatchPathsIncludesXrayExtraConfigs(t *testing.T) {
+	assetDir := t.TempDir()
+	for _, name := range []string{"dns.json", "route.json", "custom_outbound.json"} {
+		path := filepath.Join(assetDir, name)
+		if err := os.WriteFile(path, []byte(`{}`), 0644); err != nil {
+			t.Fatalf("write %s failed: %v", name, err)
+		}
+	}
+	inboundPath := filepath.Join(assetDir, "custom_inbound.json")
+	if err := os.WriteFile(inboundPath, []byte(`[]`), 0644); err != nil {
+		t.Fatalf("write custom_inbound.json failed: %v", err)
+	}
+
+	c := conf.New()
+	c.CoresConfig = []conf.CoreConfig{
+		{
+			Type: "xray",
+			XrayConfig: &conf.XrayConfig{
+				AssetPath:         assetDir,
+				InboundConfigPath: inboundPath,
+			},
+		},
+	}
+
+	paths := detectWatchPaths(c)
+	if len(paths) != 4 {
+		t.Fatalf("expected 4 watch paths, got %d", len(paths))
 	}
 }

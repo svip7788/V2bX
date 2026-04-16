@@ -10,7 +10,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	defer c.runtimeMu.Unlock()
 	defer c.limiter.MarkOnlineDeviceReported()
 
-	userTraffic, trafficErr := c.server.GetUserTrafficSlice(c.tag, true)
+	userTraffic, trafficErr := c.server.GetUserTrafficSlice(c.tag, false)
 	if trafficErr != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
@@ -63,8 +63,15 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		return nil
 	}
 	if len(userTraffic) > 0 {
-		c.addDynamicTraffic(userTraffic)
-		log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+		if commitErr := c.server.CommitUserTraffic(c.tag, userTraffic); commitErr != nil {
+			log.WithFields(log.Fields{
+				"tag": c.tag,
+				"err": commitErr,
+			}).Error("Commit user traffic failed")
+		} else {
+			c.addDynamicTraffic(userTraffic)
+			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+		}
 	}
 	if onlineDeviceCount > 0 {
 		log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
@@ -80,12 +87,11 @@ func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int
 				"tag": c.tag,
 				"err": err,
 			}).Info("Report user traffic failed")
-			if rollbackErr := c.server.RestoreUserTraffic(c.tag, userTraffic); rollbackErr != nil {
-				log.WithFields(log.Fields{
-					"tag": c.tag,
-					"err": rollbackErr,
-				}).Error("Rollback user traffic failed")
-			}
+		} else if commitErr := c.server.CommitUserTraffic(c.tag, userTraffic); commitErr != nil {
+			log.WithFields(log.Fields{
+				"tag": c.tag,
+				"err": commitErr,
+			}).Error("Commit user traffic failed")
 		} else {
 			c.addDynamicTraffic(userTraffic)
 			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))

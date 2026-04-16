@@ -7,6 +7,7 @@ import (
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/counter"
+	"github.com/InazumaV/V2bX/common/format"
 	"github.com/InazumaV/V2bX/core"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/anytls"
@@ -212,6 +213,33 @@ func (b *Sing) RestoreUserTraffic(tag string, trafficSlice []panel.UserTraffic) 
 	return nil
 }
 
+func (b *Sing) CommitUserTraffic(tag string, trafficSlice []panel.UserTraffic) error {
+	if len(trafficSlice) == 0 {
+		return nil
+	}
+	v, ok := b.hookServer.counter.Load(tag)
+	if !ok {
+		return nil
+	}
+	c := v.(*counter.TrafficCounter)
+	b.users.mapLock.RLock()
+	uidToUUID := make(map[int]string, len(b.users.uidMap))
+	for uuid, uid := range b.users.uidMap {
+		uidToUUID[uid] = uuid
+	}
+	b.users.mapLock.RUnlock()
+	for i := range trafficSlice {
+		uuid, found := uidToUUID[trafficSlice[i].UID]
+		if !found {
+			continue
+		}
+		storage := c.GetCounter(uuid)
+		storage.UpCounter.Add(-trafficSlice[i].Upload)
+		storage.DownCounter.Add(-trafficSlice[i].Download)
+	}
+	return nil
+}
+
 type UserDeleter interface {
 	DelUsers(uuid []string) error
 }
@@ -251,16 +279,21 @@ func (b *Sing) DelUsers(users []panel.UserInfo, tag string, info *panel.NodeInfo
 		return err
 	}
 	b.users.mapLock.Lock()
-	defer b.users.mapLock.Unlock()
 	var tc *counter.TrafficCounter
 	if v, ok := b.hookServer.counter.Load(tag); ok {
 		tc = v.(*counter.TrafficCounter)
 	}
+	connKeys := make([]string, 0, len(users))
 	for i := range users {
 		if tc != nil {
 			tc.Delete(users[i].Uuid)
 		}
 		delete(b.users.uidMap, users[i].Uuid)
+		connKeys = append(connKeys, format.UserTag(tag, users[i].Uuid))
+	}
+	b.users.mapLock.Unlock()
+	for _, key := range connKeys {
+		b.hookServer.closeUserConnections(key)
 	}
 	return nil
 }

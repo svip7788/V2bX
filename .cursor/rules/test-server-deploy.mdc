@@ -1,0 +1,21 @@
+---
+description: 测试服务器优先走增量部署
+alwaysApply: true
+---
+
+# 测试服务器部署规则
+
+- 当用户要求把 `V2bX` 部署到现有测试服务器时，默认不要再走整包 `scp` / zip 全量上传。
+- 优先流程是：
+  1. 本地编译新的 Linux `amd64` `V2bX` 二进制。
+  2. 用 `rsync --compress --inplace --partial` 增量同步到远端 stage：`/var/tmp/v2bx-test-stage/V2bX`。
+  3. 远端执行 `/usr/local/bin/v2bx-test-activate` 做原子替换、重启和失败回滚。
+  4. 部署后检查 `systemctl is-active V2bX`、`/usr/local/V2bX/V2bX version`、`journalctl -u V2bX`。
+- 示例命令：
+```bash
+rsync --compress --inplace --partial -e "ssh -T ..." build/v2bx-current-deploy/V2bX root@<test-server>:/var/tmp/v2bx-test-stage/V2bX
+ssh root@<test-server> /usr/local/bin/v2bx-test-activate
+```
+- 不要把密码、token 或其他凭据写进仓库、规则文件或脚本。
+- 除非用户明确要求，否则测试部署只替换二进制，不主动覆盖远端配置文件。
+- 只有在 `rsync` 或远端激活脚本不可用时，才退回到整包上传方案。

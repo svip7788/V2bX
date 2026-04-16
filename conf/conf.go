@@ -19,7 +19,7 @@ type Conf struct {
 func New() *Conf {
 	return &Conf{
 		LogConfig: LogConfig{
-			Level:  "info",
+			Level:  "warning",
 			Output: "",
 		},
 	}
