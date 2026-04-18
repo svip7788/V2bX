@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -153,5 +154,46 @@ func TestReportKeepsServerErrorsOutOfLegacyFallback(t *testing.T) {
 	}
 	if IsUnsupportedReportError(err) {
 		t.Fatalf("did not expect unsupported report error: %v", err)
+	}
+}
+
+func TestReportCanFailAfterServerProcessedBody(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/server/report" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		_, _ = io.ReadAll(r.Body)
+		_ = r.Body.Close()
+		requests++
+
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Fatal("response writer does not support hijack")
+		}
+		conn, _, err := hj.Hijack()
+		if err != nil {
+			t.Fatalf("hijack failed: %v", err)
+		}
+		_ = conn.Close()
+	}))
+	defer server.Close()
+
+	client, err := New(&conf.ApiConfig{
+		APIHost:  server.URL,
+		NodeID:   1,
+		Key:      "test",
+		NodeType: "vmess",
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	if err == nil {
+		t.Fatal("expected report error")
+	}
+	if requests != 1 {
+		t.Fatalf("expected server to process exactly 1 request, got %d", requests)
 	}
 }
