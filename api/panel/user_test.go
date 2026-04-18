@@ -82,3 +82,76 @@ func TestGetUserListForcesPeriodicFullRefresh(t *testing.T) {
 		t.Fatalf("unexpected third users: %#v", users)
 	}
 }
+
+func TestNewDisablesAutoRetry(t *testing.T) {
+	client, err := New(&conf.ApiConfig{
+		APIHost:  "http://127.0.0.1",
+		NodeID:   1,
+		Key:      "test",
+		NodeType: "vmess",
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+	if client.client.RetryCount != 0 {
+		t.Fatalf("expected retry count 0, got %d", client.client.RetryCount)
+	}
+}
+
+func TestReportReturnsUnsupportedErrorForLegacyPanel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/server/report" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`not found`))
+	}))
+	defer server.Close()
+
+	client, err := New(&conf.ApiConfig{
+		APIHost:  server.URL,
+		NodeID:   1,
+		Key:      "test",
+		NodeType: "vmess",
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	if err == nil {
+		t.Fatal("expected report error")
+	}
+	if !IsUnsupportedReportError(err) {
+		t.Fatalf("expected unsupported report error, got %T: %v", err, err)
+	}
+}
+
+func TestReportKeepsServerErrorsOutOfLegacyFallback(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v2/server/report" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`server busy`))
+	}))
+	defer server.Close()
+
+	client, err := New(&conf.ApiConfig{
+		APIHost:  server.URL,
+		NodeID:   1,
+		Key:      "test",
+		NodeType: "vmess",
+	})
+	if err != nil {
+		t.Fatalf("new client: %v", err)
+	}
+
+	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	if err == nil {
+		t.Fatal("expected report error")
+	}
+	if IsUnsupportedReportError(err) {
+		t.Fatalf("did not expect unsupported report error: %v", err)
+	}
+}

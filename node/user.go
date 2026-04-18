@@ -55,11 +55,16 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 
 	reportErr := c.apiClient.Report(userTraffic, aliveData)
 	if reportErr != nil {
-		log.WithFields(log.Fields{
+		entry := log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": reportErr,
-		}).Info("V2 report failed, fallback to V1")
-		c.reportV1(userTraffic, aliveData, onlineDeviceCount)
+		})
+		if panel.IsUnsupportedReportError(reportErr) {
+			entry.Info("V2 report unsupported, fallback to V1")
+			c.reportV1(userTraffic, aliveData, onlineDeviceCount)
+		} else {
+			entry.Warn("V2 report failed, skip V1 fallback to avoid duplicate traffic")
+		}
 		return nil
 	}
 	if len(userTraffic) > 0 {

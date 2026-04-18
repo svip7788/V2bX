@@ -1,7 +1,9 @@
 package panel
 
 import (
+	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"encoding/json/jsontext"
@@ -170,6 +172,20 @@ type ReportRequest struct {
 	Alive   map[int][]string `json:"alive,omitempty"`
 }
 
+type UnsupportedReportError struct {
+	URL        string
+	StatusCode int
+}
+
+func (e *UnsupportedReportError) Error() string {
+	return fmt.Sprintf("request %s failed: endpoint unsupported (status code %d)", e.URL, e.StatusCode)
+}
+
+func IsUnsupportedReportError(err error) bool {
+	var target *UnsupportedReportError
+	return errors.As(err, &target)
+}
+
 // Report merges traffic + alive into a single V2 API call
 func (c *Client) Report(traffic []UserTraffic, alive map[int][]string) error {
 	req := &ReportRequest{}
@@ -193,6 +209,15 @@ func (c *Client) Report(traffic []UserTraffic, alive map[int][]string) error {
 		SetBody(req).
 		ForceContentType("application/json").
 		Post(path)
+	if r != nil {
+		switch r.StatusCode() {
+		case http.StatusNotFound, http.StatusMethodNotAllowed, http.StatusNotImplemented:
+			return &UnsupportedReportError{
+				URL:        c.assembleURL(path),
+				StatusCode: r.StatusCode(),
+			}
+		}
+	}
 	err = c.checkResponse(r, path, err)
 	if err != nil {
 		return err

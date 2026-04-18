@@ -44,7 +44,8 @@ func New(c *conf.ApiConfig) (*Client, error) {
 	} else {
 		client = resty.New()
 	}
-	client.SetRetryCount(3)
+	// Do not auto-retry panel requests. Traffic report APIs are POST and
+	// not guaranteed to be idempotent, so retries can duplicate usage.
 	if c.Timeout > 0 {
 		client.SetTimeout(time.Duration(c.Timeout) * time.Second)
 	} else {
