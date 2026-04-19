@@ -78,12 +78,14 @@ func (h *HookServer) getConnManager(taguuid string) *userConnManager {
 	return actual.(*userConnManager)
 }
 
-func (h *HookServer) closeUserConnections(taguuid string) {
+func (h *HookServer) closeUserConnections(taguuid string) int {
 	if m, ok := h.connManagers.Load(taguuid); ok {
 		manager := m.(*userConnManager)
-		manager.CloseAll()
+		n := manager.CloseAll()
 		h.connManagers.Delete(taguuid)
+		return n
 	}
+	return 0
 }
 
 func (h *HookServer) closeTagConnections(tag string) {

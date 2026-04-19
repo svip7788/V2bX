@@ -9,6 +9,7 @@ import (
 	"github.com/InazumaV/V2bX/common/counter"
 	"github.com/InazumaV/V2bX/common/format"
 	"github.com/InazumaV/V2bX/core"
+	log "github.com/sirupsen/logrus"
 	"github.com/sagernet/sing-box/option"
 	"github.com/sagernet/sing-box/protocol/anytls"
 	"github.com/sagernet/sing-box/protocol/hysteria"
@@ -292,8 +293,16 @@ func (b *Sing) DelUsers(users []panel.UserInfo, tag string, info *panel.NodeInfo
 		connKeys = append(connKeys, format.UserTag(tag, users[i].Uuid))
 	}
 	b.users.mapLock.Unlock()
+	var closed int
 	for _, key := range connKeys {
-		b.hookServer.closeUserConnections(key)
+		if n := b.hookServer.closeUserConnections(key); n > 0 {
+			closed += n
+		}
 	}
+	log.WithFields(log.Fields{
+		"tag":       tag,
+		"users":     len(users),
+		"closeConn": closed,
+	}).Infof("sing: DelUsers removed %d users, closed %d live conns", len(users), closed)
 	return nil
 }

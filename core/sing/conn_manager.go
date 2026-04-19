@@ -48,7 +48,7 @@ func (m *userConnManager) markOwner(key string, owner *sync.Map) {
 	m.mu.Unlock()
 }
 
-func (m *userConnManager) CloseAll() {
+func (m *userConnManager) CloseAll() int {
 	m.mu.Lock()
 	snapshot := make([]managedCloser, 0, len(m.conns))
 	for conn := range m.conns {
@@ -59,6 +59,7 @@ func (m *userConnManager) CloseAll() {
 	for _, conn := range snapshot {
 		_ = conn.Close()
 	}
+	return len(snapshot)
 }
 
 type trackedConn struct {

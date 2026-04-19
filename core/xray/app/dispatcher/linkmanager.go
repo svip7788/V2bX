@@ -54,7 +54,7 @@ func (m *LinkManager) markOwner(key string, owner *sync.Map) {
 	m.mu.Unlock()
 }
 
-func (m *LinkManager) CloseAll() {
+func (m *LinkManager) CloseAll() int {
 	m.mu.Lock()
 	snapshot := make(map[*ManagedWriter]buf.Reader, len(m.links))
 	for w, r := range m.links {
@@ -66,4 +66,5 @@ func (m *LinkManager) CloseAll() {
 		common.Close(w)
 		common.Interrupt(r)
 	}
+	return len(snapshot)
 }

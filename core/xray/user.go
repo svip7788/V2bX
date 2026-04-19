@@ -9,6 +9,7 @@ import (
 	"github.com/InazumaV/V2bX/common/format"
 	vCore "github.com/InazumaV/V2bX/core"
 	"github.com/InazumaV/V2bX/core/xray/app/dispatcher"
+	log "github.com/sirupsen/logrus"
 	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/proxy"
 )
@@ -49,6 +50,7 @@ func (c *Xray) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) e
 	if v, ok := c.dispatcher.Counter.Load(tag); ok {
 		tc = v.(*counter.TrafficCounter)
 	}
+	var closed int
 	for _, user := range removedUsers {
 		delete(c.users.uidMap, user)
 		if tc != nil {
@@ -56,10 +58,15 @@ func (c *Xray) DelUsers(users []panel.UserInfo, tag string, _ *panel.NodeInfo) e
 		}
 		if v, ok := c.dispatcher.LinkManagers.Load(user); ok {
 			lm := v.(*dispatcher.LinkManager)
-			lm.CloseAll()
+			closed += lm.CloseAll()
 			c.dispatcher.LinkManagers.Delete(user)
 		}
 	}
+	log.WithFields(log.Fields{
+		"tag":       tag,
+		"users":     len(removedUsers),
+		"closeConn": closed,
+	}).Infof("xray: DelUsers removed %d users, closed %d live conns", len(removedUsers), closed)
 	if err != nil {
 		return err
 	}
