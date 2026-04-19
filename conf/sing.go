@@ -2,6 +2,7 @@ package conf
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/sagernet/sing-box/option"
 )
@@ -13,10 +14,12 @@ type SingConfig struct {
 }
 
 type SingLogConfig struct {
-	Disabled  bool   `json:"Disable"`
-	Level     string `json:"Level"`
-	Output    string `json:"Output"`
-	Timestamp bool   `json:"Timestamp"`
+	Disabled   bool   `json:"Disable"`
+	Level      string `json:"Level"`
+	Output     string `json:"Output"`
+	Timestamp  bool   `json:"Timestamp"`
+	AccessPath string `json:"AccessPath,omitempty"`
+	ErrorPath  string `json:"ErrorPath,omitempty"`
 }
 
 func NewSingConfig() *SingConfig {
@@ -31,6 +34,47 @@ func NewSingConfig() *SingConfig {
 			ServerPort: 0,
 		},
 	}
+}
+
+func (c SingLogConfig) Normalized() SingLogConfig {
+	normalized := c
+	normalized.Level = strings.ToLower(strings.TrimSpace(normalized.Level))
+	normalized.Output = strings.TrimSpace(normalized.Output)
+	normalized.AccessPath = strings.TrimSpace(normalized.AccessPath)
+	normalized.ErrorPath = strings.TrimSpace(normalized.ErrorPath)
+
+	if normalized.Level == "warning" {
+		normalized.Level = "warn"
+	}
+
+	if normalized.Output == "none" {
+		normalized.Output = ""
+	}
+
+	if normalized.Level == "" {
+		normalized.Level = "error"
+	}
+
+	if normalized.Level == "none" {
+		normalized.Disabled = true
+		normalized.Level = "error"
+	}
+
+	if normalized.Disabled {
+		normalized.Output = ""
+		return normalized
+	}
+
+	if normalized.Output == "" {
+		switch {
+		case normalized.ErrorPath != "" && normalized.ErrorPath != "none":
+			normalized.Output = normalized.ErrorPath
+		case normalized.AccessPath != "" && normalized.AccessPath != "none":
+			normalized.Output = normalized.AccessPath
+		}
+	}
+
+	return normalized
 }
 
 type SingOptions struct {
