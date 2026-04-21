@@ -1,6 +1,8 @@
 package node
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"github.com/InazumaV/V2bX/api/panel"
@@ -62,9 +64,17 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 	c.runtimeMu.Lock()
 	defer c.runtimeMu.Unlock()
 
+	ctx := c.currentCtx()
+	if ctx.Err() != nil {
+		return nil
+	}
+
 	// get node info
-	newN, err := c.apiClient.GetNodeInfo()
+	newN, err := c.apiClient.GetNodeInfo(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": err,
@@ -72,8 +82,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 	// get user info
-	newU, err := c.apiClient.GetUserList()
+	newU, err := c.apiClient.GetUserList(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": err,
@@ -81,8 +94,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 	// get user alive
-	newA, err := c.apiClient.GetUserAlive()
+	newA, err := c.apiClient.GetUserAlive(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil
+		}
 		log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": err,

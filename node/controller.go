@@ -1,6 +1,7 @@
 package node
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sync"
@@ -31,15 +32,20 @@ type Controller struct {
 	wsClient                  *panel.WSClient
 	wsStopCh                  chan struct{}
 	runtimeMu                 sync.Mutex
+	ctx                       context.Context
+	cancel                    context.CancelFunc
 	*conf.Options
 }
 
 // NewController return a Node controller with default parameters.
 func NewController(server vCore.Core, api *panel.Client, config *conf.Options) *Controller {
+	ctx, cancel := context.WithCancel(context.Background())
 	controller := &Controller{
 		server:    server,
 		Options:   config,
 		apiClient: api,
+		ctx:       ctx,
+		cancel:    cancel,
 	}
 	return controller
 }
@@ -48,16 +54,17 @@ func NewController(server vCore.Core, api *panel.Client, config *conf.Options) *
 func (c *Controller) Start() error {
 	// First fetch Node Info
 	var err error
-	node, err := c.apiClient.GetNodeInfo()
+	ctx := c.currentCtx()
+	node, err := c.apiClient.GetNodeInfo(ctx)
 	if err != nil {
 		return fmt.Errorf("get node info error: %s", err)
 	}
 	// Update user
-	c.userList, err = c.apiClient.GetUserList()
+	c.userList, err = c.apiClient.GetUserList(ctx)
 	if err != nil {
 		return fmt.Errorf("get user list error: %s", err)
 	}
-	c.aliveMap, err = c.apiClient.GetUserAlive()
+	c.aliveMap, err = c.apiClient.GetUserAlive(ctx)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"err": err,
@@ -111,6 +118,9 @@ func (c *Controller) Start() error {
 
 // Close implement the Close() function of the service interface
 func (c *Controller) Close() error {
+	if c.cancel != nil {
+		c.cancel()
+	}
 	if c.wsStopCh != nil {
 		close(c.wsStopCh)
 	}
@@ -142,6 +152,15 @@ func (c *Controller) Close() error {
 
 func (c *Controller) buildNodeTag(node *panel.NodeInfo) string {
 	return fmt.Sprintf("[%s]-%s:%d", c.apiClient.APIHost, node.Type, node.Id)
+}
+
+// currentCtx returns a usable context even if the Controller was constructed
+// without NewController (e.g. from tests with hand-built struct literals).
+func (c *Controller) currentCtx() context.Context {
+	if c.ctx != nil {
+		return c.ctx
+	}
+	return context.Background()
 }
 
 func (c *Controller) tryStartWebSocket() {

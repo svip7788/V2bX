@@ -143,7 +143,9 @@ func TestReportUserTrafficTaskFallsBackToV1WhenV2Unsupported(t *testing.T) {
 	if v1Calls != 1 {
 		t.Fatalf("expected 1 v1 fallback call, got %d", v1Calls)
 	}
-	if core.commitCalls != 1 {
-		t.Fatalf("expected 1 traffic commit after v1 fallback, got %d", core.commitCalls)
+	// One-phase accounting: traffic is cleared inside GetUserTrafficSlice,
+	// so CommitUserTraffic is never invoked regardless of report outcome.
+	if core.commitCalls != 0 {
+		t.Fatalf("expected no explicit traffic commit under one-phase accounting, got %d", core.commitCalls)
 	}
 }

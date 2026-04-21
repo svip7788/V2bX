@@ -169,8 +169,8 @@ func (b *Sing) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic,
 			}
 			if up+down > minBytes {
 				if reset {
-					traffic.UpCounter.Add(-up)
-					traffic.DownCounter.Add(-down)
+					traffic.UpCounter.Store(0)
+					traffic.DownCounter.Store(0)
 				}
 				trafficSlice = append(trafficSlice, panel.UserTraffic{
 					UID:      uid,

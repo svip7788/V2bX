@@ -1,6 +1,9 @@
 package node
 
 import (
+	"context"
+	"errors"
+
 	"github.com/InazumaV/V2bX/api/panel"
 	log "github.com/sirupsen/logrus"
 )
@@ -10,7 +13,12 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 	defer c.runtimeMu.Unlock()
 	defer c.limiter.MarkOnlineDeviceReported()
 
-	userTraffic, trafficErr := c.server.GetUserTrafficSlice(c.tag, false)
+	ctx := c.currentCtx()
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	userTraffic, trafficErr := c.server.GetUserTrafficSlice(c.tag, true)
 	if trafficErr != nil {
 		log.WithFields(log.Fields{
 			"tag": c.tag,
@@ -53,30 +61,32 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		c.wsClient.SendDeviceReport(aliveData)
 	}
 
-	reportErr := c.apiClient.Report(userTraffic, aliveData)
+	reportErr := c.apiClient.Report(ctx, userTraffic, aliveData)
 	if reportErr != nil {
 		entry := log.WithFields(log.Fields{
 			"tag": c.tag,
 			"err": reportErr,
 		})
-		if panel.IsUnsupportedReportError(reportErr) {
+		switch {
+		case errors.Is(reportErr, context.Canceled), errors.Is(reportErr, context.DeadlineExceeded):
+			entry.Info("V2 report cancelled, traffic discarded")
+		case panel.IsUnsupportedReportError(reportErr):
 			entry.Info("V2 report unsupported, fallback to V1")
 			c.reportV1(userTraffic, aliveData, onlineDeviceCount)
-		} else {
-			entry.Warn("V2 report failed, skip V1 fallback to avoid duplicate traffic")
+		default:
+			entry.Warn("V2 report failed, traffic discarded")
 		}
 		return nil
 	}
 	if len(userTraffic) > 0 {
-		if commitErr := c.server.CommitUserTraffic(c.tag, userTraffic); commitErr != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": commitErr,
-			}).Error("Commit user traffic failed")
-		} else {
-			c.addDynamicTraffic(userTraffic)
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+		c.addDynamicTraffic(userTraffic)
+		var totalUp, totalDown int64
+		for i := range userTraffic {
+			totalUp += userTraffic[i].Upload
+			totalDown += userTraffic[i].Download
 		}
+		log.WithField("tag", c.tag).Infof("Report %d users traffic (up=%d down=%d total=%.2f MB)",
+			len(userTraffic), totalUp, totalDown, float64(totalUp+totalDown)/1024.0/1024.0)
 	}
 	if onlineDeviceCount > 0 {
 		log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
@@ -85,29 +95,41 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 }
 
 func (c *Controller) reportV1(userTraffic []panel.UserTraffic, aliveData map[int][]string, onlineDeviceCount int) {
+	ctx := c.currentCtx()
 	if len(userTraffic) > 0 {
-		err := c.apiClient.ReportUserTraffic(userTraffic)
+		err := c.apiClient.ReportUserTraffic(ctx, userTraffic)
 		if err != nil {
-			log.WithFields(log.Fields{
+			entry := log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Info("Report user traffic failed")
-		} else if commitErr := c.server.CommitUserTraffic(c.tag, userTraffic); commitErr != nil {
-			log.WithFields(log.Fields{
-				"tag": c.tag,
-				"err": commitErr,
-			}).Error("Commit user traffic failed")
+			})
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				entry.Info("V1 report cancelled, traffic discarded")
+			} else {
+				entry.Info("Report user traffic failed")
+			}
 		} else {
 			c.addDynamicTraffic(userTraffic)
-			log.WithField("tag", c.tag).Infof("Report %d users traffic", len(userTraffic))
+			var totalUp, totalDown int64
+			for i := range userTraffic {
+				totalUp += userTraffic[i].Upload
+				totalDown += userTraffic[i].Download
+			}
+			log.WithField("tag", c.tag).Infof("Report %d users traffic (up=%d down=%d total=%.2f MB)",
+				len(userTraffic), totalUp, totalDown, float64(totalUp+totalDown)/1024.0/1024.0)
 		}
 	}
 	if len(aliveData) > 0 {
-		if err := c.apiClient.ReportNodeOnlineUsers(&aliveData); err != nil {
-			log.WithFields(log.Fields{
+		if err := c.apiClient.ReportNodeOnlineUsers(ctx, &aliveData); err != nil {
+			entry := log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Info("Report online users failed")
+			})
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				entry.Info("Report online users cancelled")
+			} else {
+				entry.Info("Report online users failed")
+			}
 		} else {
 			log.WithField("tag", c.tag).Infof("Total %d online users, %d Reported", onlineDeviceCount, len(aliveData))
 		}

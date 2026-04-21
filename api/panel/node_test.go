@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"log"
 	"testing"
 
@@ -23,12 +24,12 @@ func init() {
 }
 
 func TestClient_GetNodeInfo(t *testing.T) {
-	log.Println(client.GetNodeInfo())
-	log.Println(client.GetNodeInfo())
+	log.Println(client.GetNodeInfo(context.Background()))
+	log.Println(client.GetNodeInfo(context.Background()))
 }
 
 func TestClient_ReportUserTraffic(t *testing.T) {
-	log.Println(client.ReportUserTraffic([]UserTraffic{
+	log.Println(client.ReportUserTraffic(context.Background(), []UserTraffic{
 		{
 			UID:      10372,
 			Upload:   1000,

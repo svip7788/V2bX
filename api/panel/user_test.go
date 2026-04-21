@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -57,7 +58,7 @@ func TestGetUserListForcesPeriodicFullRefresh(t *testing.T) {
 	client.userListForceRefreshAfter = time.Minute
 
 	current = time.Unix(0, 0)
-	users, err := client.GetUserList()
+	users, err := client.GetUserList(context.Background())
 	if err != nil {
 		t.Fatalf("first get user list: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestGetUserListForcesPeriodicFullRefresh(t *testing.T) {
 	}
 
 	current = current.Add(30 * time.Second)
-	users, err = client.GetUserList()
+	users, err = client.GetUserList(context.Background())
 	if err != nil {
 		t.Fatalf("second get user list: %v", err)
 	}
@@ -75,7 +76,7 @@ func TestGetUserListForcesPeriodicFullRefresh(t *testing.T) {
 	}
 
 	current = current.Add(2 * time.Minute)
-	users, err = client.GetUserList()
+	users, err = client.GetUserList(context.Background())
 	if err != nil {
 		t.Fatalf("third get user list: %v", err)
 	}
@@ -119,7 +120,7 @@ func TestReportReturnsUnsupportedErrorForLegacyPanel(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	err = client.Report(context.Background(), []UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
 	if err == nil {
 		t.Fatal("expected report error")
 	}
@@ -148,7 +149,7 @@ func TestReportKeepsServerErrorsOutOfLegacyFallback(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	err = client.Report(context.Background(), []UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
 	if err == nil {
 		t.Fatal("expected report error")
 	}
@@ -189,7 +190,7 @@ func TestReportCanFailAfterServerProcessedBody(t *testing.T) {
 		t.Fatalf("new client: %v", err)
 	}
 
-	err = client.Report([]UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
+	err = client.Report(context.Background(), []UserTraffic{{UID: 1, Upload: 10, Download: 20}}, nil)
 	if err == nil {
 		t.Fatal("expected report error")
 	}
