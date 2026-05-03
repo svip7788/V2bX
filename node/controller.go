@@ -30,6 +30,7 @@ type Controller struct {
 	dynamicSpeedLimitPeriodic *task.Task
 	onlineIpReportPeriodic    *task.Task
 	wsClient                  *panel.WSClient
+	wsConnected               func() bool
 	wsStopCh                  chan struct{}
 	runtimeMu                 sync.Mutex
 	ctx                       context.Context
@@ -161,6 +162,13 @@ func (c *Controller) currentCtx() context.Context {
 		return c.ctx
 	}
 	return context.Background()
+}
+
+func (c *Controller) isWebSocketConnected() bool {
+	if c.wsConnected != nil {
+		return c.wsConnected()
+	}
+	return c.wsClient != nil && c.wsClient.IsConnected()
 }
 
 func (c *Controller) tryStartWebSocket() {

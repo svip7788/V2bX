@@ -16,7 +16,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 	// fetch node info task
 	c.nodeInfoMonitorPeriodic = &task.Task{
 		Interval: node.PullInterval,
-		Execute:  c.nodeInfoMonitor,
+		Execute:  c.periodicNodeInfoMonitor,
 	}
 	// fetch user list task
 	c.userReportPeriodic = &task.Task{
@@ -58,6 +58,13 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 		log.Printf("[%s: %d] Start dynamic speed limit", c.apiClient.NodeType, c.apiClient.NodeId)
 		_ = c.dynamicSpeedLimitPeriodic.Start(false)
 	}
+}
+
+func (c *Controller) periodicNodeInfoMonitor() error {
+	if c.isWebSocketConnected() {
+		return nil
+	}
+	return c.nodeInfoMonitor()
 }
 
 func (c *Controller) nodeInfoMonitor() (err error) {
