@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -323,12 +324,18 @@ func runChildGroupServer(c *conf.Conf, configPath string, groupID int) error {
 	}
 
 	if fullGroupCount > 1 && c.LogConfig.PprofListen != "" {
-		log.WithFields(log.Fields{
-			"group_id": groupID,
-			"node_ids": formatNodeIDs(selectedGroup.Nodes),
-			"listen":   c.LogConfig.PprofListen,
-		}).Warn("Skip pprof in child mode to avoid port conflicts")
-		c.LogConfig.PprofListen = ""
+		// Each worker is a separate process, so give every group its own
+		// pprof port (base+groupID) instead of disabling it outright.
+		if listen, err := offsetListenPort(c.LogConfig.PprofListen, groupID); err != nil {
+			log.WithFields(log.Fields{
+				"group_id": groupID,
+				"listen":   c.LogConfig.PprofListen,
+				"err":      err,
+			}).Warn("Invalid pprof listen, disable pprof in child mode")
+			c.LogConfig.PprofListen = ""
+		} else {
+			c.LogConfig.PprofListen = listen
+		}
 	}
 
 	log.WithFields(log.Fields{
@@ -622,6 +629,24 @@ func sendSignalToChildren(children map[int]*exec.Cmd, sig os.Signal) {
 			}).Warn("Signal child process failed")
 		}
 	}
+}
+
+// offsetListenPort returns the listen address with its port shifted by delta,
+// used to give each worker process a distinct pprof port.
+func offsetListenPort(listen string, delta int) (string, error) {
+	host, portStr, err := net.SplitHostPort(listen)
+	if err != nil {
+		return "", err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return "", fmt.Errorf("invalid port %q: %w", portStr, err)
+	}
+	newPort := port + delta
+	if newPort < 1 || newPort > 65535 {
+		return "", fmt.Errorf("port out of range: %d", newPort)
+	}
+	return net.JoinHostPort(host, strconv.Itoa(newPort)), nil
 }
 
 func waitForRestart(ctx context.Context) bool {
