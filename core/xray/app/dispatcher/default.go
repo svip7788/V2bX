@@ -205,6 +205,13 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 			manager: lm,
 		}
 		lm.AddLink(managedWriter, outboundLink.Reader)
+		// Safety net: the tracking map holds a strong reference to the
+		// connection and is normally cleaned up via ManagedWriter.Close().
+		// Some connections end without an explicit Close (xray abandons the
+		// link and relies on GC), which would pin them in the map forever.
+		// Removing them when the per-connection context is cancelled bounds
+		// the leak to the connection lifetime. Close is idempotent.
+		context.AfterFunc(ctx, func() { _ = managedWriter.Close() })
 		inboundLink.Writer = managedWriter
 		if w != nil {
 			sessionInbound.CanSpliceCopy = 3
@@ -387,6 +394,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			Counter: &ts.UpCounter,
 		}
 		lm.AddLink(managedWriter, outbound.Reader)
+		context.AfterFunc(ctx, func() { _ = managedWriter.Close() })
 		outbound.Writer = &dispatcher.SizeStatWriter{
 			Counter: downcounter,
 			Writer:  outbound.Writer,

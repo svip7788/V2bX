@@ -27,7 +27,7 @@ func (h *HookServer) ModeList() []string {
 	return nil
 }
 
-func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
+func (h *HookServer) RoutedConnection(ctx context.Context, conn net.Conn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) net.Conn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
 		log.Warn("get limiter for ", m.Inbound, " error: ", err)
@@ -57,6 +57,11 @@ func (h *HookServer) RoutedConnection(_ context.Context, conn net.Conn, m adapte
 	t := h.getCounter(m.Inbound)
 	conn = counter.NewConnCounter(conn, t.GetCounter(m.User))
 	conn = newTrackedConn(conn, h.getConnManager(taguuid))
+	// Safety net: untrack and close when the per-connection context is
+	// cancelled, in case sing-box ends the connection without calling Close
+	// on our wrapper. Close is idempotent (guarded by sync.Once).
+	tracked := conn
+	context.AfterFunc(ctx, func() { _ = tracked.Close() })
 	return conn
 }
 
@@ -104,7 +109,7 @@ func (h *HookServer) closeTagConnections(tag string) {
 	})
 }
 
-func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
+func (h *HookServer) RoutedPacketConnection(ctx context.Context, conn N.PacketConn, m adapter.InboundContext, _ adapter.Rule, _ adapter.Outbound) N.PacketConn {
 	l, err := limiter.GetLimiter(m.Inbound)
 	if err != nil {
 		log.Warn("get limiter for ", m.Inbound, " error: ", err)
@@ -134,5 +139,7 @@ func (h *HookServer) RoutedPacketConnection(_ context.Context, conn N.PacketConn
 	t := h.getCounter(m.Inbound)
 	conn = counter.NewPacketConnCounter(conn, t.GetCounter(m.User))
 	conn = newTrackedPacketConn(conn, h.getConnManager(taguuid))
+	tracked := conn
+	context.AfterFunc(ctx, func() { _ = tracked.Close() })
 	return conn
 }
