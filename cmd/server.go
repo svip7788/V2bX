@@ -54,6 +54,13 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	}
 	defer cleanup()
 
+	if c.MachineConfig.Enabled() && childGroupIndex == 0 {
+		if err := runMachineServer(c); err != nil {
+			log.WithField("err", err).Error("Run machine server failed")
+		}
+		return
+	}
+
 	if childGroupIndex > 0 {
 		if err := runChildGroupServer(c, config, childGroupIndex); err != nil {
 			log.WithFields(log.Fields{

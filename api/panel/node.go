@@ -171,7 +171,7 @@ type Rules struct {
 }
 
 func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
-	const path = "/api/v1/server/UniProxy/config"
+	path := c.apiPath("/api/v1/server/UniProxy/config")
 	r, err := c.client.
 		R().
 		SetContext(ctx).

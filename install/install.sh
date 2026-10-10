@@ -7,6 +7,36 @@ plain='\033[0m'
 
 cur_dir=$(pwd)
 
+# 机器模式（Xboard 面板一键安装）：--panel URL --machine-id N --token T [--version V] [--core auto|sing|xray] [--repo owner/name]
+repo="svip7788/V2bX"
+target_version=""
+panel_url=""
+machine_id=""
+machine_token=""
+machine_core="auto"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --panel) panel_url="$2"; shift 2 ;;
+        --machine-id) machine_id="$2"; shift 2 ;;
+        --token) machine_token="$2"; shift 2 ;;
+        --version) target_version="$2"; shift 2 ;;
+        --core) machine_core="$2"; shift 2 ;;
+        --repo) repo="$2"; shift 2 ;;
+        *) target_version="$1"; shift ;;
+    esac
+done
+machine_mode=false
+if [[ -n "$panel_url" || -n "$machine_id" || -n "$machine_token" ]]; then
+    if [[ -z "$panel_url" || -z "$machine_token" || ! "$machine_id" =~ ^[0-9]+$ ]]; then
+        echo -e "${red}机器模式需要同时提供 --panel、--machine-id、--token${plain}" && exit 1
+    fi
+    case "$machine_core" in auto|sing|xray) ;; *) echo -e "${red}--core 只能是 auto/sing/xray${plain}" && exit 1 ;; esac
+    machine_mode=true
+fi
+if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo -e "${red}--repo 格式应为 用户名/仓库名${plain}" && exit 1
+fi
+
 # check root
 [[ $EUID -ne 0 ]] && echo -e "${red}错误：${plain} 必须使用root用户运行此脚本！\n" && exit 1
 
@@ -123,6 +153,48 @@ check_status() {
     fi
 }
 
+start_and_check() {
+    if [[ x"${release}" == x"alpine" ]]; then
+        service V2bX start
+    else
+        systemctl start V2bX
+    fi
+    sleep 2
+    check_status
+    if [[ $? == 0 ]]; then
+        echo -e "\n${green}V2bX 启动成功${plain}"
+    else
+        echo -e "\n${red}V2bX 可能启动失败，请稍后使用 V2bX log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/svip7788/V2bX/wiki${plain}"
+    fi
+}
+
+json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
+
+write_machine_config() {
+    if [[ -f /etc/V2bX/config.json ]]; then
+        cp /etc/V2bX/config.json "/etc/V2bX/config.json.bak.$(date +%Y%m%d%H%M%S)"
+    fi
+    cat > /etc/V2bX/config.json <<EOF
+{
+    "Log": {
+        "Level": "error",
+        "Output": ""
+    },
+    "Machine": {
+        "ApiHost": "$(json_escape "${panel_url%/}")",
+        "MachineID": ${machine_id},
+        "Token": "$(json_escape "$machine_token")",
+        "Core": "${machine_core}",
+        "Timeout": 30
+    }
+}
+EOF
+    chmod 600 /etc/V2bX/config.json
+    echo -e "${green}已写入机器模式配置 /etc/V2bX/config.json（机器 #${machine_id}）${plain}"
+}
+
 install_V2bX() {
     if [[ -e /usr/local/V2bX/ ]]; then
         rm -rf /usr/local/V2bX/
@@ -131,35 +203,40 @@ install_V2bX() {
     mkdir /usr/local/V2bX/ -p
     cd /usr/local/V2bX/
 
-    if  [ $# == 0 ] ;then
-        last_version=$(curl -Ls "https://api.github.com/repos/svip7788/V2bX/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    if  [[ -z "$1" || "$1" == "latest" ]] ;then
+        last_version=$(curl -Ls "https://api.github.com/repos/${repo}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
         if [[ ! -n "$last_version" ]]; then
             echo -e "${red}检测 V2bX 版本失败，可能是超出 Github API 限制，请稍后再试，或手动指定 V2bX 版本安装${plain}"
             exit 1
         fi
         echo -e "检测到 V2bX 最新版本：${last_version}，开始安装"
-        wget --no-check-certificate -N --progress=bar -O /usr/local/V2bX/V2bX-linux.zip https://github.com/svip7788/V2bX/releases/download/${last_version}/V2bX-linux-${arch}.zip
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 V2bX 失败，请确保你的服务器能够下载 Github 的文件${plain}"
-            exit 1
-        fi
     else
         last_version=$1
-        url="https://github.com/svip7788/V2bX/releases/download/${last_version}/V2bX-linux-${arch}.zip"
         echo -e "开始安装 V2bX $1"
-        wget --no-check-certificate -N --progress=bar -O /usr/local/V2bX/V2bX-linux.zip ${url}
-        if [[ $? -ne 0 ]]; then
-            echo -e "${red}下载 V2bX $1 失败，请确保此版本存在${plain}"
-            exit 1
+    fi
+    url="https://github.com/${repo}/releases/download/${last_version}/V2bX-linux-${arch}.zip"
+    downloaded=false
+    for mirror in "" "https://ghfast.top/" "https://gh-proxy.com/"; do
+        if wget --no-check-certificate -q --timeout=30 --tries=2 -O /usr/local/V2bX/V2bX-linux.zip "${mirror}${url}" \
+            && [[ -s /usr/local/V2bX/V2bX-linux.zip ]]; then
+            downloaded=true
+            break
         fi
+        echo -e "${yellow}下载失败: ${mirror}${url}，尝试下一个源${plain}"
+    done
+    if [[ $downloaded != true ]]; then
+        echo -e "${red}下载 V2bX ${last_version} 失败，请确保此版本存在且服务器能访问 Github${plain}"
+        exit 1
     fi
 
-    unzip V2bX-linux.zip
+    unzip -oq V2bX-linux.zip || { echo -e "${red}解压失败，压缩包可能不完整${plain}"; exit 1; }
     rm V2bX-linux.zip -f
     chmod +x V2bX
     mkdir /etc/V2bX/ -p
     cp geoip.dat /etc/V2bX/
     cp geosite.dat /etc/V2bX/
+    echo "${last_version}" > /usr/local/V2bX/.version
+    echo "${last_version}" > /etc/V2bX/.panel_version
     if [[ x"${release}" == x"alpine" ]]; then
         rm /etc/init.d/V2bX -f
         cat <<EOF > /etc/init.d/V2bX
@@ -218,48 +295,34 @@ EOF
         echo -e "${green}V2bX ${last_version}${plain} 安装完成，已设置开机自启"
     fi
 
-    if [[ ! -f /etc/V2bX/config.json ]]; then
+    if [[ $machine_mode == true ]]; then
+        write_machine_config
+        first_install=false
+    elif [[ ! -f /etc/V2bX/config.json ]]; then
         cp config.json /etc/V2bX/
         echo -e ""
         echo -e "全新安装，请先配置 /etc/V2bX/config.json"
         first_install=true
     else
-        if [[ x"${release}" == x"alpine" ]]; then
-            service V2bX start
-        else
-            systemctl start V2bX
-        fi
-        sleep 2
-        check_status
-        echo -e ""
-        if [[ $? == 0 ]]; then
-            echo -e "${green}V2bX 重启成功${plain}"
-        else
-            echo -e "${red}V2bX 可能启动失败，请稍后使用 V2bX log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/svip7788/V2bX/wiki${plain}"
-        fi
+        start_and_check
         first_install=false
     fi
 
-    if [[ ! -f /etc/V2bX/dns.json ]]; then
-        cp dns.json /etc/V2bX/
-    fi
-    if [[ ! -f /etc/V2bX/route.json ]]; then
-        cp route.json /etc/V2bX/
-    fi
-    if [[ ! -f /etc/V2bX/custom_outbound.json ]]; then
-        cp custom_outbound.json /etc/V2bX/
-    fi
-    if [[ ! -f /etc/V2bX/custom_inbound.json ]]; then
-        cp custom_inbound.json /etc/V2bX/
+    for f in dns.json route.json custom_outbound.json custom_inbound.json sing_origin.json; do
+        if [[ ! -f /etc/V2bX/$f && -f $f ]]; then
+            cp $f /etc/V2bX/
+        fi
+    done
+    if [[ $machine_mode == true ]]; then
+        start_and_check
     fi
     mkdir -p /etc/sysctl.d
     if [[ ! -f /etc/sysctl.d/99-v2bx-performance.conf ]]; then
         cp 99-v2bx-performance.conf /etc/sysctl.d/99-v2bx-performance.conf
     fi
     sysctl --system >/dev/null 2>&1 || true
-    cp collect_pprof.sh /usr/local/V2bX/collect_pprof.sh
-    chmod +x /usr/local/V2bX/collect_pprof.sh
-    curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/V2bX.sh
+    chmod +x /usr/local/V2bX/collect_pprof.sh 2>/dev/null || true
+    curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/${repo}/HEAD/install/V2bX.sh
     chmod +x /usr/bin/V2bX
     if [ ! -L /usr/bin/v2bx ]; then
         ln -s /usr/bin/V2bX /usr/bin/v2bx
@@ -301,4 +364,4 @@ EOF
 
 echo -e "${green}开始安装${plain}"
 install_base
-install_V2bX $1
+install_V2bX "$target_version"

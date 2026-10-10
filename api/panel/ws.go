@@ -49,6 +49,8 @@ type WSClient struct {
 	token    string
 	nodeId   int
 	nodeType string
+	// >0 时为机器级连接：整台机器一条连接，事件 data 内带 node_id
+	machineID int
 }
 
 func (ws *WSClient) queueEvent(evt WSEvent) {
@@ -83,14 +85,17 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 }
 
 func (c *Client) NewWSClient(wsURL string) (*WSClient, error) {
-	ws := &WSClient{
+	return startWSClient(wsURL, &WSClient{
 		stopCh:   make(chan struct{}),
 		eventCh:  make(chan WSEvent, 64),
 		apiHost:  c.APIHost,
 		token:    c.Token,
 		nodeId:   c.NodeId,
 		nodeType: c.NodeType,
-	}
+	})
+}
+
+func startWSClient(wsURL string, ws *WSClient) (*WSClient, error) {
 	if err := ws.connect(wsURL); err != nil {
 		return nil, err
 	}
@@ -106,7 +111,11 @@ func (ws *WSClient) connect(wsURL string) error {
 	}
 	q := u.Query()
 	q.Set("token", ws.token)
-	q.Set("node_id", strconv.Itoa(ws.nodeId))
+	if ws.machineID > 0 {
+		q.Set("machine_id", strconv.Itoa(ws.machineID))
+	} else {
+		q.Set("node_id", strconv.Itoa(ws.nodeId))
+	}
 	u.RawQuery = q.Encode()
 
 	if !strings.HasPrefix(u.Scheme, "ws") {
@@ -246,6 +255,27 @@ func (ws *WSClient) SendDeviceReport(data map[int][]string) {
 		return
 	}
 	ws.send(msg)
+}
+
+// Send 发送任意事件，连接断开时静默丢弃
+func (ws *WSClient) Send(event string, data any) {
+	msg, err := json.Marshal(map[string]any{
+		"event": event,
+		"data":  data,
+	})
+	if err != nil {
+		log.WithField("err", err).Warn("WS marshal message failed")
+		return
+	}
+	ws.send(msg)
+}
+
+// SendNodeDeviceReport 机器级连接上报单个节点的在线设备
+func (ws *WSClient) SendNodeDeviceReport(nodeID int, data map[int][]string) {
+	ws.Send("report.devices", map[string]any{
+		"node_id": nodeID,
+		"devices": data,
+	})
 }
 
 func (ws *WSClient) DroppedAndReset() bool {

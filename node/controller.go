@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/task"
@@ -32,6 +33,9 @@ type Controller struct {
 	wsClient                  *panel.WSClient
 	wsConnected               func() bool
 	wsStopCh                  chan struct{}
+	machineWS                 MachineWSBridge
+	machineEvents             chan panel.WSEvent
+	machineEventsDropped      atomic.Bool
 	runtimeMu                 sync.Mutex
 	ctx                       context.Context
 	cancel                    context.CancelFunc
@@ -85,6 +89,7 @@ func (c *Controller) Start() error {
 		return fmt.Errorf("update rule error: %s", err)
 	}
 	c.limiter = l
+	c.info = node
 	c.applyPanelCertConfig(node)
 	if node.Security == panel.Tls {
 		err = c.requestCert()
@@ -113,8 +118,72 @@ func (c *Controller) Start() error {
 	c.info = node
 	c.rebuildUIDToUUID()
 	c.startTasks(node)
-	c.tryStartWebSocket()
+	if c.machineWS != nil {
+		c.startMachineEventLoop()
+	} else {
+		c.tryStartWebSocket()
+	}
 	return nil
+}
+
+// MachineWSBridge 机器模式下共享的 WS 连接
+type MachineWSBridge interface {
+	IsConnected() bool
+	SendNodeDeviceReport(nodeID int, data map[int][]string)
+}
+
+// AttachMachineWS 须在 Start 之前调用，之后该节点不再自建 WS 连接
+func (c *Controller) AttachMachineWS(bridge MachineWSBridge) {
+	c.machineWS = bridge
+	c.machineEvents = make(chan panel.WSEvent, 64)
+}
+
+// DispatchWSEvent 由机器管理器转发属于本节点的事件，不阻塞
+func (c *Controller) DispatchWSEvent(evt panel.WSEvent) {
+	if c.machineEvents == nil {
+		return
+	}
+	select {
+	case c.machineEvents <- evt:
+	default:
+		c.machineEventsDropped.Store(true)
+		log.WithField("tag", c.tag).Warn("Machine WS event queue full, dropping event: ", evt.Event)
+	}
+}
+
+func (c *Controller) startMachineEventLoop() {
+	c.wsStopCh = make(chan struct{})
+	go func(stop <-chan struct{}) {
+		for {
+			select {
+			case <-stop:
+				return
+			case evt := <-c.machineEvents:
+				c.processWSEvent(evt)
+				if c.machineEventsDropped.Swap(false) {
+					log.WithField("tag", c.tag).Warn("WS events were dropped, triggering full sync")
+					if err := c.nodeInfoMonitor(); err != nil {
+						log.WithField("err", err).Warn("Full sync after WS drop failed")
+					}
+				}
+			}
+		}
+	}(c.wsStopCh)
+}
+
+func (c *Controller) sendDeviceReport(aliveData map[int][]string) {
+	if len(aliveData) == 0 {
+		return
+	}
+	if c.machineWS != nil {
+		if c.machineWS.IsConnected() {
+			c.machineWS.SendNodeDeviceReport(c.apiClient.NodeId, aliveData)
+		}
+		return
+	}
+	if c.wsClient != nil && c.wsClient.IsConnected() {
+		c.wsClient.SendDeviceReport(aliveData)
+	}
 }
 
 // Close implement the Close() function of the service interface
@@ -167,6 +236,9 @@ func (c *Controller) currentCtx() context.Context {
 func (c *Controller) isWebSocketConnected() bool {
 	if c.wsConnected != nil {
 		return c.wsConnected()
+	}
+	if c.machineWS != nil {
+		return c.machineWS.IsConnected()
 	}
 	return c.wsClient != nil && c.wsClient.IsConnected()
 }
@@ -308,26 +380,41 @@ func (c *Controller) applyUserDelta(action string, users []panel.UserInfo) {
 		if len(users) == 0 {
 			return
 		}
-		if err := c.applyUserChangesLocked(nil, users); err != nil {
+		// 面板的 remove 只保证带 id，uuid 需从本地列表补全（内核按 uuid 删用户）
+		removeIDs := make(map[int]struct{}, len(users))
+		removeUUIDs := make(map[string]struct{}, len(users))
+		for _, u := range users {
+			if u.Id > 0 {
+				removeIDs[u.Id] = struct{}{}
+			}
+			if u.Uuid != "" {
+				removeUUIDs[u.Uuid] = struct{}{}
+			}
+		}
+		var matched []panel.UserInfo
+		filtered := make([]panel.UserInfo, 0, len(c.userList))
+		for _, u := range c.userList {
+			_, byID := removeIDs[u.Id]
+			_, byUUID := removeUUIDs[u.Uuid]
+			if byID || byUUID {
+				matched = append(matched, u)
+			} else {
+				filtered = append(filtered, u)
+			}
+		}
+		if len(matched) == 0 {
+			return
+		}
+		if err := c.applyUserChangesLocked(nil, matched); err != nil {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
 			}).Error("WS: remove users failed")
 			return
 		}
-		removeSet := make(map[string]struct{}, len(users))
-		for _, u := range users {
-			removeSet[u.Uuid] = struct{}{}
-		}
-		filtered := make([]panel.UserInfo, 0, len(c.userList))
-		for _, u := range c.userList {
-			if _, rm := removeSet[u.Uuid]; !rm {
-				filtered = append(filtered, u)
-			}
-		}
 		c.userList = filtered
 		c.rebuildUIDToUUID()
-		log.WithField("tag", c.tag).Infof("WS: delta removed %d users", len(users))
+		log.WithField("tag", c.tag).Infof("WS: delta removed %d users", len(matched))
 	}
 }
 

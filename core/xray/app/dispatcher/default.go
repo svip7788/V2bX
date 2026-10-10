@@ -204,7 +204,7 @@ func (d *DefaultDispatcher) getLink(ctx context.Context, network net.Network) (*
 			writer:  uplinkWriter,
 			manager: lm,
 		}
-		lm.AddLink(managedWriter, outboundLink.Reader)
+		lm.AddLink(managedWriter, outboundLink.Reader, sessionInbound.Conn)
 		// Safety net: the tracking map holds a strong reference to the
 		// connection and is normally cleaned up via ManagedWriter.Close().
 		// Some connections end without an explicit Close (xray abandons the
@@ -393,7 +393,7 @@ func (d *DefaultDispatcher) DispatchLink(ctx context.Context, destination net.De
 			Reader:  &buf.TimeoutWrapperReader{Reader: outbound.Reader},
 			Counter: &ts.UpCounter,
 		}
-		lm.AddLink(managedWriter, outbound.Reader)
+		lm.AddLink(managedWriter, outbound.Reader, sessionInbound.Conn)
 		context.AfterFunc(ctx, func() { _ = managedWriter.Close() })
 		outbound.Writer = &dispatcher.SizeStatWriter{
 			Counter: downcounter,
@@ -623,7 +623,7 @@ func (d *DefaultDispatcher) getOrCreateLinkManager(email string) *LinkManager {
 		return lm
 	}
 	v, _ := d.LinkManagers.LoadOrStore(email, &LinkManager{
-		links: make(map[*ManagedWriter]buf.Reader),
+		links: make(map[*ManagedWriter]managedLink),
 		key:   email,
 		owner: &d.LinkManagers,
 	})

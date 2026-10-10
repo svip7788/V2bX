@@ -136,8 +136,8 @@ func defaultSingDNS(ctx context.Context) (*option.DNSOptions, error) {
 	defaultJSON := []byte(`{
 		"dns": {
 			"servers": [
-				{"tag": "google-doh",  "type": "https",  "server": "dns.google", "server_port": 443, "path": "/dns-query"},
-				{"tag": "google-dot",  "type": "tls",    "server": "dns.google", "server_port": 853},
+				{"tag": "google-doh",  "type": "https",  "server": "dns.google", "server_port": 443, "path": "/dns-query", "domain_resolver": "google-udp"},
+				{"tag": "google-dot",  "type": "tls",    "server": "dns.google", "server_port": 853, "domain_resolver": "google-udp"},
 				{"tag": "google-udp",  "type": "udp",    "server": "8.8.8.8",   "server_port": 53},
 				{"tag": "google-tcp",  "type": "tcp",    "server": "8.8.8.8",   "server_port": 53}
 			],

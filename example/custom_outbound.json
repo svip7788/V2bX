@@ -2,15 +2,21 @@
     {
         "tag": "IPv4_out",
         "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv4"
+        "settings": {},
+        "streamSettings": {
+            "sockopt": {
+                "domainStrategy": "UseIPv4"
+            }
         }
     },
     {
         "tag": "IPv6_out",
         "protocol": "freedom",
-        "settings": {
-            "domainStrategy": "UseIPv6"
+        "settings": {},
+        "streamSettings": {
+            "sockopt": {
+                "domainStrategy": "UseIPv6"
+            }
         }
     },
     {

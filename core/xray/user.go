@@ -95,8 +95,9 @@ func (x *Xray) GetUserTrafficSlice(tag string, reset bool) ([]panel.UserTraffic,
 			}
 			if up+down > minBytes {
 				if reset {
-					traffic.UpCounter.Store(0)
-					traffic.DownCounter.Store(0)
+					// Swap 而非 Store(0)：Load 之后新写入的字节留到下一轮，不丢
+					up = traffic.UpCounter.Swap(0)
+					down = traffic.DownCounter.Swap(0)
 				}
 				trafficSlice = append(trafficSlice, panel.UserTraffic{
 					UID:      uid,

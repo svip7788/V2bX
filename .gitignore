@@ -17,5 +17,6 @@ output/*
 newV2bX.sh
 quic_singbox.sh
 build
+!third_party/**/build/
 .gocache/*
 .cursor/*

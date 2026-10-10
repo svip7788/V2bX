@@ -112,9 +112,10 @@ func (s *userDeviceState) snapshotCurrent() []panel.OnlineUser {
 func (s *userDeviceState) markReported() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// 每个上报周期对所有出现过的用户执行一次，空闲用户不分配新 map（allow 会按需创建）
 	if len(s.current) == 0 {
 		s.reported = nil
-		s.current = make(map[string]struct{})
+		s.current = nil
 		return
 	}
 	s.reported = s.current

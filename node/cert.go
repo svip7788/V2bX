@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/InazumaV/V2bX/common/file"
@@ -58,8 +59,18 @@ func (c *Controller) requestCert() error {
 		if file.IsExist(c.CertConfig.CertFile) && file.IsExist(c.CertConfig.KeyFile) {
 			return nil
 		}
+		domain := c.CertConfig.CertDomain
+		if domain == "" && c.info != nil && c.info.Common != nil {
+			domain = c.info.Common.ServerName
+			if domain == "" {
+				domain = c.info.Common.Host
+			}
+		}
+		if domain == "" {
+			domain = "localhost"
+		}
 		err := generateSelfSslCertificate(
-			c.CertConfig.CertDomain,
+			domain,
 			c.CertConfig.CertFile,
 			c.CertConfig.KeyFile)
 		if err != nil {
@@ -92,6 +103,12 @@ func generateSelfSslCertificate(domain, certPath, keyPath string) error {
 	cert, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(certPath), 0755); err != nil {
+		return fmt.Errorf("create cert dir error: %s", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0755); err != nil {
+		return fmt.Errorf("create key dir error: %s", err)
 	}
 	certPEM := pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",

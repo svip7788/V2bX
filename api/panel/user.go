@@ -35,7 +35,7 @@ type AliveMap struct {
 
 // GetUserList will pull user from v2board
 func (c *Client) GetUserList(ctx context.Context) ([]UserInfo, error) {
-	const path = "/api/v1/server/UniProxy/user"
+	path := c.apiPath("/api/v1/server/UniProxy/user")
 	req := c.client.R().
 		SetContext(ctx).
 		SetHeader("X-Response-Format", "msgpack").
@@ -102,7 +102,7 @@ func (c *Client) GetUserList(ctx context.Context) ([]UserInfo, error) {
 // GetUserAlive will fetch the alive_ip count for users
 func (c *Client) GetUserAlive(ctx context.Context) (map[int]int, error) {
 	c.AliveMap = &AliveMap{}
-	const path = "/api/v1/server/UniProxy/alivelist"
+	path := c.apiPath("/api/v1/server/UniProxy/alivelist")
 	r, err := c.client.R().
 		SetContext(ctx).
 		ForceContentType("application/json").
@@ -145,7 +145,7 @@ func (c *Client) ReportUserTraffic(ctx context.Context, userTraffic []UserTraffi
 			data[uid] = []int64{userTraffic[i].Upload, userTraffic[i].Download}
 		}
 	}
-	const path = "/api/v1/server/UniProxy/push"
+	path := c.apiPath("/api/v1/server/UniProxy/push")
 	r, err := c.client.R().
 		SetContext(ctx).
 		SetBody(data).
@@ -159,7 +159,7 @@ func (c *Client) ReportUserTraffic(ctx context.Context, userTraffic []UserTraffi
 }
 
 func (c *Client) ReportNodeOnlineUsers(ctx context.Context, data *map[int][]string) error {
-	const path = "/api/v1/server/UniProxy/alive"
+	path := c.apiPath("/api/v1/server/UniProxy/alive")
 	r, err := c.client.R().
 		SetContext(ctx).
 		SetBody(data).

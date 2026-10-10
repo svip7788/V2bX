@@ -1,6 +1,6 @@
 module github.com/InazumaV/V2bX
 
-go 1.26
+go 1.27
 
 require (
 	github.com/beevik/ntp v1.4.4-0.20240716062501-06ef196b89ec
@@ -9,19 +9,19 @@ require (
 	github.com/go-resty/resty/v2 v2.16.5
 	github.com/gorilla/websocket v1.5.3
 	github.com/juju/ratelimit v1.0.2
-	github.com/sagernet/sing v0.8.4
+	github.com/sagernet/sing v0.9.6
 	github.com/sagernet/sing-box v1.13.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.2
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/xtls/xray-core v1.260327.0
-	golang.org/x/crypto v0.50.0
-	golang.org/x/sys v0.43.0
-	google.golang.org/protobuf v1.36.11
+	golang.org/x/crypto v0.57.0
+	golang.org/x/sys v0.48.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
-	cloud.google.com/go/auth v0.16.5 // indirect
+	cloud.google.com/go/auth v0.20.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.8 // indirect
 	cloud.google.com/go/compute/metadata v0.9.0 // indirect
 	filippo.io/edwards25519 v1.1.0 // indirect
@@ -59,7 +59,7 @@ require (
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/anthropics/anthropic-sdk-go v1.26.0 // indirect
 	github.com/anytls/sing-anytls v0.0.11 // indirect
-	github.com/apernet/quic-go v0.59.1-0.20260330051153-c402ee641eb6 // indirect
+	github.com/apernet/quic-go v0.61.1-0.20260806010916-184d081eef3e // indirect
 	github.com/aws/aws-sdk-go-v2 v1.36.6 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.29.18 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.71 // indirect
@@ -84,7 +84,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/clbanning/mxj/v2 v2.7.0 // indirect
-	github.com/cloudflare/circl v1.6.3 // indirect
+	github.com/cloudflare/circl v1.6.5 // indirect
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/coreos/go-iptables v0.7.1-0.20240112124308-65c67c9f46e6 // indirect
 	github.com/cretz/bine v0.2.0 // indirect
@@ -96,7 +96,7 @@ require (
 	github.com/ebitengine/purego v0.9.1 // indirect
 	github.com/exoscale/egoscale/v3 v3.1.24 // indirect
 	github.com/fatih/structs v1.1.0 // indirect
-	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/florianl/go-nfqueue/v2 v2.0.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
@@ -107,7 +107,7 @@ require (
 	github.com/go-chi/chi/v5 v5.2.5 // indirect
 	github.com/go-chi/render v1.0.3 // indirect
 	github.com/go-errors/errors v1.0.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.3 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-json-experiment/json v0.0.0-20250813024750-ebf49471dced // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -128,11 +128,12 @@ require (
 	github.com/google/btree v1.1.3 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/go-querystring v1.1.0 // indirect
+	github.com/google/gopacket v1.1.19 // indirect
 	github.com/google/nftables v0.2.1-0.20240414091927-5e242ec57806 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
-	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
+	github.com/googleapis/enterprise-certificate-proxy v0.3.15 // indirect
+	github.com/googleapis/gax-go/v2 v2.22.0 // indirect
 	github.com/gophercloud/gophercloud v1.14.1 // indirect
 	github.com/gophercloud/utils v0.0.0-20231010081019-80377eca5d56 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -142,17 +143,20 @@ require (
 	github.com/hashicorp/yamux v0.1.2 // indirect
 	github.com/hdevalence/ed25519consensus v0.2.0 // indirect
 	github.com/huaweicloud/huaweicloud-sdk-go-v3 v0.1.159 // indirect
+	github.com/huin/goupnp v1.2.0 // indirect
 	github.com/iij/doapi v0.0.0-20190504054126-0bbf12d6d7df // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/infobloxopen/infoblox-go-client/v2 v2.10.0 // indirect
 	github.com/insomniacslk/dhcp v0.0.0-20260220084031-5adc3eb26f91 // indirect
+	github.com/jackpal/go-nat-pmp v1.0.2 // indirect
 	github.com/jsimonetti/rtnetlink v1.4.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/k0kubun/go-ansi v0.0.0-20180517002512-3bf9e2903213 // indirect
 	github.com/keybase/go-keychain v0.0.1 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
-	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
+	github.com/klauspost/cpuid/v2 v2.4.0 // indirect
 	github.com/kolo/xmlrpc v0.0.0-20220921171641-a4b6fa1dd06b // indirect
+	github.com/koron/go-ssdp v0.0.4 // indirect
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/labbsr0x/bindman-dns-webhook v1.0.2 // indirect
 	github.com/labbsr0x/goh v1.0.1 // indirect
@@ -161,6 +165,8 @@ require (
 	github.com/libdns/alidns v1.0.6 // indirect
 	github.com/libdns/cloudflare v0.2.2 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect
+	github.com/libp2p/go-nat v1.0.1-0.20250821073202-01afc089f138 // indirect
+	github.com/libp2p/go-netroute v0.2.1 // indirect
 	github.com/linode/linodego v1.53.0 // indirect
 	github.com/liquidweb/liquidweb-cli v0.6.9 // indirect
 	github.com/liquidweb/liquidweb-go v1.6.4 // indirect
@@ -171,7 +177,7 @@ require (
 	github.com/mdlayher/socket v0.5.1 // indirect
 	github.com/metacubex/utls v1.8.4 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
-	github.com/miekg/dns v1.1.72 // indirect
+	github.com/miekg/dns v1.1.73 // indirect
 	github.com/mimuret/golang-iij-dpf v0.9.1 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-ps v1.0.0 // indirect
@@ -199,7 +205,11 @@ require (
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
 	github.com/peterhellberg/link v1.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.21 // indirect
-	github.com/pires/go-proxyproto v0.11.0 // indirect
+	github.com/pion/dtls/v3 v3.1.5 // indirect
+	github.com/pion/logging v0.2.4 // indirect
+	github.com/pion/stun/v3 v3.1.7 // indirect
+	github.com/pion/transport/v4 v4.1.0 // indirect
+	github.com/pires/go-proxyproto v0.15.0 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pquerna/otp v1.5.0 // indirect
@@ -208,6 +218,7 @@ require (
 	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af // indirect
 	github.com/regfish/regfish-dnsapi-go v0.1.1 // indirect
 	github.com/riobard/go-bloom v0.0.0-20200614022211-cdc8013cb5b3 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/sacloud/api-client-go v0.3.2 // indirect
 	github.com/sacloud/go-http v0.1.9 // indirect
 	github.com/sacloud/iaas-api-go v1.16.1 // indirect
@@ -301,9 +312,10 @@ require (
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/volcengine/volc-sdk-golang v1.0.216 // indirect
 	github.com/vultr/govultr/v3 v3.21.1 // indirect
+	github.com/wlynxg/anet v0.0.5 // indirect
 	github.com/wyx2685/sing-vmess v0.0.0-20250723121437-95d5ab59ff92 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
-	github.com/xtls/reality v0.0.0-20260322125925-9234c772ba8f // indirect
+	github.com/xtls/reality v0.0.0-20260908062103-8cdf7bf9c7f0 // indirect
 	github.com/yandex-cloud/go-genproto v0.14.0 // indirect
 	github.com/yandex-cloud/go-sdk/services/dns v0.0.3 // indirect
 	github.com/yandex-cloud/go-sdk/v2 v2.0.8 // indirect
@@ -311,10 +323,10 @@ require (
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.mongodb.org/mongo-driver v1.13.1 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.61.0 // indirect
-	go.opentelemetry.io/otel v1.39.0 // indirect
-	go.opentelemetry.io/otel/metric v1.39.0 // indirect
-	go.opentelemetry.io/otel/trace v1.39.0 // indirect
+	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.69.0 // indirect
+	go.opentelemetry.io/otel v1.44.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
+	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/ratelimit v0.3.1 // indirect
@@ -323,21 +335,20 @@ require (
 	go4.org/mem v0.0.0-20240501181205-ae6ca9944745 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/exp v0.0.0-20251219203646-944ab1f22d93 // indirect
-	golang.org/x/mod v0.34.0 // indirect
-	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/term v0.42.0 // indirect
-	golang.org/x/text v0.36.0 // indirect
-	golang.org/x/time v0.12.0 // indirect
-	golang.org/x/tools v0.43.0 // indirect
+	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/oauth2 v0.36.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/term v0.46.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	golang.org/x/time v0.15.0 // indirect
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard v0.0.0-20250521234502-f333402bd9cb // indirect
-	golang.zx2c4.com/wireguard/windows v0.5.3 // indirect
-	google.golang.org/api v0.249.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
-	google.golang.org/grpc v1.80.0 // indirect
+	golang.zx2c4.com/wireguard/windows v1.1.1 // indirect
+	google.golang.org/api v0.278.0 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260706201446-f0a921348800 // indirect
+	google.golang.org/grpc v1.84.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/ns1/ns1-go.v2 v2.14.4 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
@@ -346,6 +357,9 @@ require (
 	lukechampine.com/blake3 v1.4.1 // indirect
 )
 
-replace github.com/sagernet/sing-box v1.13.0 => github.com/svip7788/sing-box v1.13.6-v2bx.1
+replace github.com/sagernet/sing-box v1.13.0 => ./third_party/sing-box
 
-replace github.com/xtls/xray-core => github.com/wyx2685/xray-core v0.0.0-20260414175829-a1d42cc5a4c8
+// sing-box 1.13 / sing-tun 0.8 只兼容 sing 0.8.x；xray 分支要求 0.9.x，按 0.8 编译
+replace github.com/sagernet/sing => github.com/sagernet/sing v0.8.4
+
+replace github.com/xtls/xray-core => github.com/wyx2685/xray-core v0.0.0-20260930151924-e087e74a1bf2

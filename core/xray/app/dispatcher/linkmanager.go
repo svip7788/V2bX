@@ -1,6 +1,7 @@
 package dispatcher
 
 import (
+	"net"
 	sync "sync"
 
 	"github.com/xtls/xray-core/common"
@@ -21,20 +22,27 @@ func (w *ManagedWriter) Close() error {
 	return common.Close(w.writer)
 }
 
+type managedLink struct {
+	reader buf.Reader
+	// DispatchLink（如 VLESS）的读写端直接包着客户端连接，既不可中断也不可关闭，
+	// 必须关掉原始连接才能让会话立即结束。
+	conn net.Conn
+}
+
 type LinkManager struct {
-	links map[*ManagedWriter]buf.Reader
+	links map[*ManagedWriter]managedLink
 	mu    sync.Mutex
 	key   string
 	owner *sync.Map
 }
 
-func (m *LinkManager) AddLink(writer *ManagedWriter, reader buf.Reader) {
+func (m *LinkManager) AddLink(writer *ManagedWriter, reader buf.Reader, conn net.Conn) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.owner != nil && len(m.key) > 0 {
 		m.owner.Store(m.key, m)
 	}
-	m.links[writer] = reader
+	m.links[writer] = managedLink{reader: reader, conn: conn}
 }
 
 func (m *LinkManager) RemoveWriter(writer *ManagedWriter) {
@@ -56,15 +64,15 @@ func (m *LinkManager) markOwner(key string, owner *sync.Map) {
 
 func (m *LinkManager) CloseAll() int {
 	m.mu.Lock()
-	snapshot := make(map[*ManagedWriter]buf.Reader, len(m.links))
-	for w, r := range m.links {
-		snapshot[w] = r
-	}
-	m.links = make(map[*ManagedWriter]buf.Reader)
+	snapshot := m.links
+	m.links = make(map[*ManagedWriter]managedLink)
 	m.mu.Unlock()
-	for w, r := range snapshot {
+	for w, l := range snapshot {
 		common.Close(w)
-		common.Interrupt(r)
+		common.Interrupt(l.reader)
+		if l.conn != nil {
+			_ = l.conn.Close()
+		}
 	}
 	return len(snapshot)
 }

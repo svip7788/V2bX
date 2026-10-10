@@ -31,11 +31,36 @@ type Client struct {
 	nowFunc                   func() time.Time
 	userListForceRefreshAfter time.Duration
 	lastUserListFullFetchAt   time.Time
+	// >0 时为机器模式：以 machine_id + 机器 token 鉴权并走 /api/v2/server/*
+	MachineID int
 }
 
 const defaultUserListForceRefreshAfter = 5 * time.Minute
 
-func New(c *conf.ApiConfig) (*Client, error) {
+// NewMachineNode 创建机器模式下单个节点的客户端，c.Key 为机器 token
+func NewMachineNode(c *conf.ApiConfig, machineID int) (*Client, error) {
+	if machineID <= 0 {
+		return nil, fmt.Errorf("invalid machine id: %d", machineID)
+	}
+	client, err := New(c)
+	if err != nil {
+		return nil, err
+	}
+	client.MachineID = machineID
+	client.client.QueryParam.Del("node_type")
+	client.client.SetQueryParam("machine_id", strconv.Itoa(machineID))
+	return client, nil
+}
+
+// apiPath 机器模式下把 V1 UniProxy 路径映射到 V2 路径
+func (c *Client) apiPath(v1Path string) string {
+	if c.MachineID <= 0 {
+		return v1Path
+	}
+	return "/api/v2/server/" + v1Path[strings.LastIndex(v1Path, "/")+1:]
+}
+
+func newRestyClient(c *conf.ApiConfig) *resty.Client {
 	var client *resty.Client
 	if c.APISendIP != "" {
 		client = resty.NewWithLocalAddr(&net.TCPAddr{
@@ -60,6 +85,11 @@ func New(c *conf.ApiConfig) (*Client, error) {
 		}
 	})
 	client.SetBaseURL(c.APIHost)
+	return client
+}
+
+func New(c *conf.ApiConfig) (*Client, error) {
+	client := newRestyClient(c)
 	// Check node type
 	c.NodeType = strings.ToLower(c.NodeType)
 	switch c.NodeType {

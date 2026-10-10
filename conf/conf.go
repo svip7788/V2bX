@@ -14,6 +14,8 @@ type Conf struct {
 	LogConfig   LogConfig    `json:"Log"`
 	CoresConfig []CoreConfig `json:"Cores"`
 	NodeConfig  []NodeConfig `json:"Nodes"`
+	// 设置且 MachineID>0 时进入机器模式，忽略 Nodes
+	MachineConfig *MachineConfig `json:"Machine"`
 }
 
 func New() *Conf {

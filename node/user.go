@@ -57,9 +57,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		return nil
 	}
 
-	if c.wsClient != nil && c.wsClient.IsConnected() && len(aliveData) > 0 {
-		c.wsClient.SendDeviceReport(aliveData)
-	}
+	c.sendDeviceReport(aliveData)
 
 	reportErr := c.apiClient.Report(ctx, userTraffic, aliveData)
 	if reportErr != nil {
