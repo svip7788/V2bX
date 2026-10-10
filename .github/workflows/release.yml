@@ -126,7 +126,10 @@ jobs:
         run: |
           echo "version: $version"
           mkdir -p build_assets
-          GOEXPERIMENT=jsonv2 go build -v -o build_assets/V2bX -tags "sing xray with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid="
+          # wlynxg/anet 在 Android 下 linkname 了 net 内部符号，需关闭链接检查
+          EXTRA_LDFLAGS=""
+          if [ "$GOOS" = "android" ]; then EXTRA_LDFLAGS="-checklinkname=0"; fi
+          GOEXPERIMENT=jsonv2 go build -v -o build_assets/V2bX -tags "sing xray with_quic with_grpc with_utls with_wireguard with_acme with_gvisor" -trimpath -ldflags "-X 'github.com/InazumaV/V2bX/cmd.version=$version' -s -w -buildid= $EXTRA_LDFLAGS"
 
       - name: Build Mips softfloat V2bX
         if: matrix.goarch == 'mips' || matrix.goarch == 'mipsle'
