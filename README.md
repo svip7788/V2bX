@@ -101,12 +101,12 @@
 ### 一键安装
 
 ```bash
-wget -N https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/install.sh && bash install.sh
+wget -N https://raw.githubusercontent.com/svip7788/V2bX-pro/dev_new/install/install.sh && bash install.sh
 ```
 
 ### 手动安装
 
-从 [Releases](https://github.com/svip7788/V2bX/releases) 下载对应平台的 zip 包。
+从 [Releases](https://github.com/svip7788/V2bX-pro/releases) 下载对应平台的 zip 包。
 
 ## 构建
 

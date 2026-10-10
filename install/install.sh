@@ -8,7 +8,7 @@ plain='\033[0m'
 cur_dir=$(pwd)
 
 # 机器模式（Xboard 面板一键安装）：--panel URL --machine-id N --token T [--version V] [--core auto|sing|xray] [--repo owner/name]
-repo="svip7788/V2bX"
+repo="svip7788/V2bX-pro"
 target_version=""
 panel_url=""
 machine_id=""
@@ -164,7 +164,7 @@ start_and_check() {
     if [[ $? == 0 ]]; then
         echo -e "\n${green}V2bX 启动成功${plain}"
     else
-        echo -e "\n${red}V2bX 可能启动失败，请稍后使用 V2bX log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/svip7788/V2bX/wiki${plain}"
+        echo -e "\n${red}V2bX 可能启动失败，请稍后使用 V2bX log 查看日志信息，若无法启动，则可能更改了配置格式，请前往 wiki 查看：https://github.com/svip7788/V2bX-pro/wiki${plain}"
     fi
 }
 
@@ -369,7 +369,7 @@ EOF
     if [[ $first_install == true ]]; then
         read -rp "检测到你为第一次安装V2bX,是否自动直接生成配置文件？(y/n): " if_generate
         if [[ $if_generate == [Yy] ]]; then
-            curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/svip7788/V2bX/dev_new/install/initconfig.sh
+            curl -o ./initconfig.sh -Ls https://raw.githubusercontent.com/svip7788/V2bX-pro/dev_new/install/initconfig.sh
             source initconfig.sh
             rm initconfig.sh -f
             generate_config_file
