@@ -176,6 +176,21 @@ write_machine_config() {
     if [[ -f /etc/V2bX/config.json ]]; then
         cp /etc/V2bX/config.json "/etc/V2bX/config.json.bak.$(date +%Y%m%d%H%M%S)"
     fi
+    # 已接入其他面板时追加为多站，同一面板则更新凭据
+    local out
+    if out=$(V2BX_MACHINE_TOKEN="$machine_token" /usr/local/V2bX/V2bX machine set -c /etc/V2bX/config.json \
+        --panel "${panel_url%/}" --machine-id "$machine_id" --core "$machine_core" 2>&1); then
+        chmod 600 /etc/V2bX/config.json
+        case "$out" in
+            *MACHINE_added*) echo -e "${green}已追加机器 #${machine_id}，本机现同时接入多个面板${plain}" ;;
+            *MACHINE_updated*) echo -e "${green}已更新机器 #${machine_id} 的配置${plain}" ;;
+            *) echo -e "${green}已写入机器模式配置 /etc/V2bX/config.json（机器 #${machine_id}）${plain}" ;;
+        esac
+        return
+    fi
+    if [[ "$out" != *"unknown command"* ]]; then
+        echo -e "${red}写入机器配置失败：${out}${plain}" && exit 1
+    fi
     cat > /etc/V2bX/config.json <<EOF
 {
     "Log": {

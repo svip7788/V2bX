@@ -13,11 +13,14 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// runMachineServer 机器模式单进程运行：节点由面板下发并可热增删，故不拆子进程
+// runMachineServer 机器模式单进程运行：节点由面板下发并可热增删，故不拆子进程；
+// 多站时各面板一个 Manager，共用同一组内核
 func runMachineServer(c *conf.Conf) error {
-	mc := c.MachineConfig
-	if strings.TrimSpace(mc.APIHost) == "" || mc.Token == "" {
-		return fmt.Errorf("Machine.ApiHost 和 Machine.Token 不能为空")
+	machines := c.Machines()
+	for _, mc := range machines {
+		if strings.TrimSpace(mc.APIHost) == "" || mc.Token == "" {
+			return fmt.Errorf("机器 #%d 的 ApiHost 和 Token 不能为空", mc.MachineID)
+		}
 	}
 	if len(c.NodeConfig) > 0 {
 		log.Warn("Machine mode enabled, Nodes in config are ignored")
@@ -33,7 +36,7 @@ func runMachineServer(c *conf.Conf) error {
 	}
 
 	limiter.Init()
-	cores := mc.CoreConfigs(c.CoresConfig)
+	cores := conf.MachinesCoreConfigs(machines, c.CoresConfig)
 	coreTypes := make([]string, 0, len(cores))
 	for _, cc := range cores {
 		coreTypes = append(coreTypes, strings.ToLower(cc.Type))
@@ -53,12 +56,20 @@ func runMachineServer(c *conf.Conf) error {
 	}
 	log.Info("Core ", vc.Type(), " started")
 
-	m, err := machine.NewManager(mc, vc, coreTypes, version)
-	if err != nil {
-		return err
+	managers := make([]*machine.Manager, 0, len(machines))
+	defer func() {
+		for _, m := range managers {
+			m.Close()
+		}
+	}()
+	for _, mc := range machines {
+		m, err := machine.NewManager(mc, vc, coreTypes, version)
+		if err != nil {
+			return err
+		}
+		m.Start()
+		managers = append(managers, m)
 	}
-	m.Start()
-	defer m.Close()
 
 	runtime.GC()
 	waitForShutdownSignal()

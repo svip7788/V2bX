@@ -31,9 +31,11 @@ type command struct {
 	Params json.RawMessage `json:"params"`
 }
 
+// 升级/重启作用于整个进程，多站各自的 Manager 共用一把锁
+var opBusy atomic.Bool
+
 type commandRunner struct {
-	m    *Manager
-	busy atomic.Bool
+	m *Manager
 }
 
 func newCommandRunner(m *Manager) *commandRunner {
@@ -81,21 +83,21 @@ func (r *commandRunner) run(cmd command) {
 		}
 		r.result(cmd.ID, err == nil, out)
 	case "restart":
-		if !r.busy.CompareAndSwap(false, true) {
+		if !opBusy.CompareAndSwap(false, true) {
 			r.result(cmd.ID, false, "有升级/重启正在进行")
 			return
 		}
 		r.result(cmd.ID, true, "V2bX 即将重启")
 		go restartSelf()
 	case "upgrade":
-		if !r.busy.CompareAndSwap(false, true) {
+		if !opBusy.CompareAndSwap(false, true) {
 			r.result(cmd.ID, false, "有升级/重启正在进行")
 			return
 		}
 		// 过程已逐行经 progress 上报，结果只带结论避免日志重复
 		restart, msg, err := r.upgrade(cmd)
 		if err != nil {
-			r.busy.Store(false)
+			opBusy.Store(false)
 			r.result(cmd.ID, false, ">>> 失败: "+err.Error())
 			return
 		}
@@ -103,7 +105,7 @@ func (r *commandRunner) run(cmd command) {
 		if restart {
 			go restartSelf()
 		} else {
-			r.busy.Store(false)
+			opBusy.Store(false)
 		}
 	default:
 		r.result(cmd.ID, false, "不支持的命令: "+cmd.Action)
@@ -124,7 +126,7 @@ func (m *Manager) currentVersion() string {
 func (m *Manager) statusText() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "版本: %s\n", m.currentVersion())
-	fmt.Fprintf(&b, "机器 ID: %d\n", m.cfg.MachineID)
+	fmt.Fprintf(&b, "机器 ID: %d（%s）\n", m.cfg.MachineID, m.cfg.APIHost)
 	fmt.Fprintf(&b, "WebSocket: %v\n", m.IsConnected())
 	fmt.Fprintf(&b, "内核: %s\n", m.core.Type())
 	nodes := m.runningNodeIDs()

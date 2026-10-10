@@ -3,6 +3,7 @@ package conf
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,18 +14,41 @@ const MachineAssetDir = "/etc/V2bX/"
 // MachineConfig 机器模式：整台机器以 machine_id + token 连接 Xboard，节点列表由面板下发
 type MachineConfig struct {
 	APIHost   string `json:"ApiHost"`
-	APISendIP string `json:"ApiSendIP"`
+	APISendIP string `json:"ApiSendIP,omitempty"`
 	MachineID int    `json:"MachineID"`
 	Token     string `json:"Token"`
 	// auto | sing | xray
-	Core    string `json:"Core"`
-	Timeout int    `json:"Timeout"`
+	Core    string `json:"Core,omitempty"`
+	Timeout int    `json:"Timeout,omitempty"`
 	// 覆盖每个节点的默认 Options，字段与 Nodes 单项相同
-	NodeDefaults json.RawMessage `json:"NodeDefaults"`
+	NodeDefaults json.RawMessage `json:"NodeDefaults,omitempty"`
+
+	// 多站时区分各面板的自签证书文件，避免同号节点互相覆盖
+	certPrefix string
 }
 
 func (m *MachineConfig) Enabled() bool {
 	return m != nil && m.MachineID > 0
+}
+
+func (m *MachineConfig) panelKey() string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(m.APIHost), "/"))
+}
+
+func (m *MachineConfig) panelSlug() string {
+	host := m.panelKey()
+	if u, err := url.Parse(host); err == nil && u.Host != "" {
+		host = u.Host
+	}
+	var b strings.Builder
+	for _, r := range host {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 // auto 模式下优先 sing 的协议（QUIC 系）；AnyTLS 两个内核都支持，auto 下走 xray
@@ -107,11 +131,22 @@ func (m *MachineConfig) CoreTypeFor(nodeType string, available []string) string 
 
 // CoreConfigs 已手写 Cores 时原样使用，否则按 Core 策略生成默认内核配置
 func (m *MachineConfig) CoreConfigs(existing []CoreConfig) []CoreConfig {
+	return MachinesCoreConfigs([]*MachineConfig{m}, existing)
+}
+
+// MachinesCoreConfigs 多站共用内核：任一站需要 xray 就一并启动
+func MachinesCoreConfigs(machines []*MachineConfig, existing []CoreConfig) []CoreConfig {
 	if len(existing) > 0 {
 		return existing
 	}
+	needXray := false
+	for _, m := range machines {
+		if m.coreMode() != "sing" {
+			needXray = true
+		}
+	}
 	cores := make([]CoreConfig, 0, 2)
-	if m.coreMode() != "sing" {
+	if needXray {
 		cores = append(cores, CoreConfig{Type: "xray", XrayConfig: defaultMachineXrayConfig()})
 	}
 	cores = append(cores, CoreConfig{Type: "sing", SingConfig: defaultMachineSingConfig()})
@@ -195,8 +230,8 @@ func (m *MachineConfig) nodeOptionsJSON(nodeID int, nodeType, coreType string) (
 		"CertConfig": map[string]any{
 			"CertMode":   certMode,
 			"CertDomain": "",
-			"CertFile":   fmt.Sprintf("%scert/node%d.crt", MachineAssetDir, nodeID),
-			"KeyFile":    fmt.Sprintf("%scert/node%d.key", MachineAssetDir, nodeID),
+			"CertFile":   fmt.Sprintf("%scert/%snode%d.crt", MachineAssetDir, m.certPrefix, nodeID),
+			"KeyFile":    fmt.Sprintf("%scert/%snode%d.key", MachineAssetDir, m.certPrefix, nodeID),
 		},
 	}
 	if coreType == "sing" {

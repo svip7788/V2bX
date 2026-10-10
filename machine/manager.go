@@ -87,7 +87,7 @@ func (m *Manager) Start() {
 	go m.syncLoop()
 	go m.pullLoop()
 	go m.statusLoop()
-	log.WithField("machine_id", m.cfg.MachineID).Info("Machine mode started")
+	log.WithFields(log.Fields{"machine_id": m.cfg.MachineID, "panel": m.cfg.APIHost}).Info("Machine mode started")
 }
 
 func (m *Manager) Close() {
