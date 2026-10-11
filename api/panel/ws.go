@@ -15,6 +15,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// 面板每 25~55s 发一次 ping；超过 wsReadTimeout 没有任何消息视为半开连接，主动断开重连
+const (
+	wsReadTimeout  = 90 * time.Second
+	wsWriteTimeout = 10 * time.Second
+)
+
 type WSEvent struct {
 	Event     string          `json:"event"`
 	Data      json.RawMessage `json:"data"`
@@ -87,7 +93,7 @@ func (c *Client) Handshake() (*HandshakeResponse, error) {
 func (c *Client) NewWSClient(wsURL string) (*WSClient, error) {
 	return startWSClient(wsURL, &WSClient{
 		stopCh:   make(chan struct{}),
-		eventCh:  make(chan WSEvent, 64),
+		eventCh:  make(chan WSEvent, 256),
 		apiHost:  c.APIHost,
 		token:    c.Token,
 		nodeId:   c.NodeId,
@@ -159,6 +165,7 @@ func (ws *WSClient) readLoop() {
 			continue
 		}
 
+		_ = conn.SetReadDeadline(time.Now().Add(wsReadTimeout))
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if ws.isClosed() {
@@ -238,6 +245,7 @@ func (ws *WSClient) send(data []byte) {
 	if ws.conn == nil {
 		return
 	}
+	_ = ws.conn.SetWriteDeadline(time.Now().Add(wsWriteTimeout))
 	_ = ws.conn.WriteMessage(websocket.TextMessage, data)
 }
 
