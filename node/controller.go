@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/common/task"
@@ -36,6 +38,7 @@ type Controller struct {
 	machineWS                 MachineWSBridge
 	machineEvents             chan panel.WSEvent
 	machineEventsDropped      atomic.Bool
+	configReloadPending       atomic.Bool
 	runtimeMu                 sync.Mutex
 	ctx                       context.Context
 	cancel                    context.CancelFunc
@@ -293,10 +296,7 @@ func (c *Controller) handleWSEvents() {
 func (c *Controller) processWSEvent(evt panel.WSEvent) {
 	switch evt.Event {
 	case "sync.config":
-		log.WithField("tag", c.tag).Info("WS: received config push, triggering reload")
-		if err := c.nodeInfoMonitor(); err != nil {
-			log.WithField("err", err).Warn("WS: nodeInfoMonitor failed after sync.config")
-		}
+		c.scheduleConfigReload()
 		return
 	}
 
@@ -335,6 +335,22 @@ func (c *Controller) processWSEvent(evt panel.WSEvent) {
 		c.limiter.SetAliveList(alive)
 		c.aliveMap = alive
 	}
+}
+
+// 连上面板时面板推一次 sync.config、重连本身也触发一次，合并成一次拉取；
+// 随机延迟错开整批节点对面板的 HTTP 请求
+func (c *Controller) scheduleConfigReload() {
+	if !c.configReloadPending.CompareAndSwap(false, true) {
+		return
+	}
+	delay := time.Second + time.Duration(rand.Int63n(int64(3*time.Second)))
+	time.AfterFunc(delay, func() {
+		c.configReloadPending.Store(false)
+		log.WithField("tag", c.tag).Info("WS: received config push, triggering reload")
+		if err := c.nodeInfoMonitor(); err != nil {
+			log.WithField("err", err).Warn("WS: nodeInfoMonitor failed after sync.config")
+		}
+	})
 }
 
 func (c *Controller) applyFullUsers(newUsers []panel.UserInfo) {

@@ -2,6 +2,7 @@ package panel
 
 import (
 	"fmt"
+	"math/rand"
 	"net/url"
 	"strconv"
 	"strings"
@@ -119,6 +120,8 @@ func (ws *WSClient) connect(wsURL string) error {
 	q.Set("token", ws.token)
 	if ws.machineID > 0 {
 		q.Set("machine_id", strconv.Itoa(ws.machineID))
+		// multi: 面板可把内容相同的节点事件合并成一条，data 内带 node_ids
+		q.Set("caps", "multi")
 	} else {
 		q.Set("node_id", strconv.Itoa(ws.nodeId))
 	}
@@ -209,10 +212,12 @@ func (ws *WSClient) reconnectLoop(wsURL string) {
 	const maxBackoff = 60 * time.Second
 
 	for {
+		// 面板重启时所有机器同时掉线，加随机抖动错开重连
+		wait := backoff + time.Duration(rand.Int63n(int64(backoff)))
 		select {
 		case <-ws.stopCh:
 			return
-		case <-time.After(backoff):
+		case <-time.After(wait):
 		}
 		ws.mu.Lock()
 		conn := ws.conn

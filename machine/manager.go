@@ -367,10 +367,21 @@ func (m *Manager) handleEvent(evt panel.WSEvent) {
 	}
 
 	var target struct {
-		NodeID int `json:"node_id"`
+		NodeID  int   `json:"node_id"`
+		NodeIDs []int `json:"node_ids"`
 	}
 	if len(evt.Data) > 0 {
 		_ = json.Unmarshal(evt.Data, &target)
+	}
+	if len(target.NodeIDs) > 0 {
+		m.mu.RLock()
+		defer m.mu.RUnlock()
+		for _, id := range target.NodeIDs {
+			if rn, ok := m.nodes[id]; ok {
+				rn.ctrl.DispatchWSEvent(evt)
+			}
+		}
+		return
 	}
 	if target.NodeID <= 0 {
 		// 重连后的 sync.config 不带 node_id：节点列表与所有节点配置都需重新同步
