@@ -324,8 +324,7 @@ check_status() {
             return 1
         fi
     else
-        temp=$(systemctl status V2bX | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
-        if [[ x"${temp}" == x"running" ]]; then
+        if systemctl is-active --quiet V2bX; then
             return 0
         else
             return 1

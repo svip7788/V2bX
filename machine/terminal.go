@@ -101,7 +101,13 @@ func (t *terminals) open(msg termMsg) {
 	if p, err := exec.LookPath("bash"); err == nil {
 		shell = p
 	}
+	// 放到独立 scope：否则 shell 处在 V2bX.service 的 cgroup 里，systemctl status 会混入终端进程，重启 V2bX 也会连带杀掉终端里启动的进程
 	cmd := exec.Command(shell, "-l")
+	if run, err := exec.LookPath("systemd-run"); err == nil {
+		if _, err := os.Stat("/run/systemd/system"); err == nil {
+			cmd = exec.Command(run, "--scope", "--quiet", shell, "-l")
+		}
+	}
 	home := os.Getenv("HOME")
 	if home == "" {
 		home = "/root"
