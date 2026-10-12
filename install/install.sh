@@ -346,7 +346,8 @@ EOF
         rm -f /tmp/v2bx-bbr.sh
     fi
     chmod +x /usr/local/V2bX/collect_pprof.sh 2>/dev/null || true
-    curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/${repo}/HEAD/install/V2bX.sh
+    local script_url="https://raw.githubusercontent.com/${repo}/HEAD/install/V2bX.sh"
+    curl -fsSL -o /usr/bin/V2bX "$script_url" || curl -fsSL -o /usr/bin/V2bX "https://ghfast.top/${script_url}"
     chmod +x /usr/bin/V2bX
     if [ ! -L /usr/bin/v2bx ]; then
         ln -s /usr/bin/V2bX /usr/bin/v2bx
@@ -355,24 +356,7 @@ EOF
     cd $cur_dir
     rm -f install.sh
     echo -e ""
-    echo "V2bX 管理脚本使用方法 (兼容使用V2bX执行，大小写不敏感): "
-    echo "------------------------------------------"
-    echo "V2bX              - 显示管理菜单 (功能更多)"
-    echo "V2bX start        - 启动 V2bX"
-    echo "V2bX stop         - 停止 V2bX"
-    echo "V2bX restart      - 重启 V2bX"
-    echo "V2bX status       - 查看 V2bX 状态"
-    echo "V2bX enable       - 设置 V2bX 开机自启"
-    echo "V2bX disable      - 取消 V2bX 开机自启"
-    echo "V2bX log          - 查看 V2bX 日志"
-    echo "V2bX x25519       - 生成 x25519 密钥"
-    echo "V2bX generate     - 生成 V2bX 配置文件"
-    echo "V2bX update       - 更新 V2bX"
-    echo "V2bX update x.x.x - 更新 V2bX 指定版本"
-    echo "V2bX install      - 安装 V2bX"
-    echo "V2bX uninstall    - 卸载 V2bX"
-    echo "V2bX version      - 查看 V2bX 版本"
-    echo "------------------------------------------"
+    /usr/bin/V2bX help
     
     # 首次安装询问是否生成配置文件
     if [[ $first_install == true ]]; then

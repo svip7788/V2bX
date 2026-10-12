@@ -132,7 +132,27 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 	}
 	_ = os.WriteFile(filepath.Join(dir, ".version"), []byte(p.Version+"\n"), 0644)
 	_ = os.WriteFile(versionFile, []byte(p.Version+"\n"), 0644)
+	r.refreshScript(p.Repo, p.Version, logf)
 	return true, ">>> 升级到 " + p.Version + " 完成，V2bX 即将重启", nil
+}
+
+const scriptPath = "/usr/bin/V2bX"
+
+// refreshScript 同步该版本的管理脚本，失败不影响升级
+func (r *commandRunner) refreshScript(repo, version string, logf func(string, ...any)) {
+	if _, err := os.Stat(scriptPath); err != nil {
+		return
+	}
+	raw := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/install/V2bX.sh", repo, version)
+	tmp := scriptPath + ".new"
+	for _, url := range []string{raw, "https://ghfast.top/" + raw} {
+		if download(r.m.ctx, url, tmp) == nil && os.Chmod(tmp, 0755) == nil && os.Rename(tmp, scriptPath) == nil {
+			logf("管理脚本已同步")
+			return
+		}
+	}
+	_ = os.Remove(tmp)
+	logf("管理脚本同步失败，可稍后执行 V2bX update_shell")
 }
 
 func download(ctx context.Context, url, dest string) error {

@@ -3,961 +3,248 @@
 red='\033[0;31m'
 green='\033[0;32m'
 yellow='\033[0;33m'
+gray='\033[0;90m'
 plain='\033[0m'
 
-# check root
-[[ $EUID -ne 0 ]] && echo -e "${red}错误: ${plain} 必须使用root用户运行此脚本！\n" && exit 1
+repo="svip7788/V2bX-pro"
+bin=/usr/local/V2bX/V2bX
+conf=/etc/V2bX/config.json
 
-# check os
-if [[ -f /etc/redhat-release ]]; then
-    release="centos"
-elif cat /etc/issue | grep -Eqi "alpine"; then
-    release="alpine"
-elif cat /etc/issue | grep -Eqi "debian"; then
-    release="debian"
-elif cat /etc/issue | grep -Eqi "ubuntu"; then
-    release="ubuntu"
-elif cat /etc/issue | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux"; then
-    release="centos"
-elif cat /proc/version | grep -Eqi "debian"; then
-    release="debian"
-elif cat /proc/version | grep -Eqi "ubuntu"; then
-    release="ubuntu"
-elif cat /proc/version | grep -Eqi "centos|red hat|redhat|rocky|alma|oracle linux"; then
-    release="centos"
-elif cat /proc/version | grep -Eqi "arch"; then
-    release="arch"
+[[ $EUID -ne 0 ]] && echo -e "${red}错误：必须使用 root 用户运行此脚本${plain}" && exit 1
+
+if [[ -f /etc/alpine-release ]] || grep -qi alpine /etc/issue 2>/dev/null; then
+    openrc=true
 else
-    echo -e "${red}未检测到系统版本，请联系脚本作者！${plain}\n" && exit 1
+    openrc=false
 fi
 
-# os version
-if [[ -f /etc/os-release ]]; then
-    os_version=$(awk -F'[= ."]' '/VERSION_ID/{print $3}' /etc/os-release)
-fi
-if [[ -z "$os_version" && -f /etc/lsb-release ]]; then
-    os_version=$(awk -F'[= ."]+' '/DISTRIB_RELEASE/{print $2}' /etc/lsb-release)
-fi
+# ---------- 基础 ----------
 
-if [[ x"${release}" == x"centos" ]]; then
-    if [[ ${os_version} -le 6 ]]; then
-        echo -e "${red}请使用 CentOS 7 或更高版本的系统！${plain}\n" && exit 1
-    fi
-    if [[ ${os_version} -eq 7 ]]; then
-        echo -e "${red}注意： CentOS 7 无法使用hysteria1/2协议！${plain}\n"
-    fi
-elif [[ x"${release}" == x"ubuntu" ]]; then
-    if [[ ${os_version} -lt 16 ]]; then
-        echo -e "${red}请使用 Ubuntu 16 或更高版本的系统！${plain}\n" && exit 1
-    fi
-elif [[ x"${release}" == x"debian" ]]; then
-    if [[ ${os_version} -lt 8 ]]; then
-        echo -e "${red}请使用 Debian 8 或更高版本的系统！${plain}\n" && exit 1
-    fi
-fi
-
-# 检查系统是否有 IPv6 地址
-check_ipv6_support() {
-    if ip -6 addr | grep -q "inet6"; then
-        echo "1"  # 支持 IPv6
-    else
-        echo "0"  # 不支持 IPv6
-    fi
+# 先直连 GitHub，失败走镜像
+fetch() {
+    local url="https://raw.githubusercontent.com/${repo}/HEAD/$1"
+    curl -fsSL --connect-timeout 10 "$url" -o "$2" || curl -fsSL --connect-timeout 15 "https://ghfast.top/${url}" -o "$2"
 }
 
-confirm() {
-    if [[ $# > 1 ]]; then
-        echo && read -rp "$1 [默认$2]: " temp
-        if [[ x"${temp}" == x"" ]]; then
-            temp=$2
-        fi
-    else
-        read -rp "$1 [y/n]: " temp
-    fi
-    if [[ x"${temp}" == x"y" || x"${temp}" == x"Y" ]]; then
-        return 0
-    else
+run_remote() {
+    local tmp
+    tmp=$(mktemp) || return 1
+    if ! fetch "$1" "$tmp"; then
+        rm -f "$tmp"
+        echo -e "${red}下载 $1 失败，请检查本机能否访问 GitHub${plain}"
         return 1
     fi
+    shift
+    bash "$tmp" "$@"
+    local rc=$?
+    rm -f "$tmp"
+    return $rc
 }
 
-confirm_restart() {
-    confirm "是否重启V2bX" "y"
-    if [[ $? == 0 ]]; then
-        restart
+svc() {
+    if $openrc; then
+        case $1 in
+            enable) rc-update add V2bX ;;
+            disable) rc-update del V2bX ;;
+            *) service V2bX "$1" ;;
+        esac
     else
-        show_menu
+        systemctl "$1" V2bX
     fi
 }
 
-before_show_menu() {
-    echo && echo -n -e "${yellow}按回车返回主菜单: ${plain}" && read temp
-    show_menu
-}
+installed() { [[ -f $bin ]]; }
 
-install() {
-    bash <(curl -Ls https://raw.githubusercontent.com/svip7788/V2bX-pro/master/install/install.sh)
-    if [[ $? == 0 ]]; then
-        if [[ $# == 0 ]]; then
-            start
-        else
-            start 0
-        fi
-    fi
-}
-
-update() {
-    if [[ $# == 0 ]]; then
-        echo && echo -n -e "输入指定版本(默认最新版): " && read version
+running() {
+    if $openrc; then
+        service V2bX status 2>/dev/null | grep -q started
     else
-        version=$2
-    fi
-    bash <(curl -Ls https://raw.githubusercontent.com/svip7788/V2bX-pro/master/install/install.sh) $version
-    if [[ $? == 0 ]]; then
-        echo -e "${green}更新完成，已自动重启 V2bX，请使用 V2bX log 查看运行日志${plain}"
-        exit
-    fi
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
+        systemctl is-active --quiet V2bX
     fi
 }
 
-config() {
-    echo "V2bX在修改配置后会自动尝试重启"
-    vi /etc/V2bX/config.json
-    sleep 2
-    restart
-    check_status
-    case $? in
-        0)
-            echo -e "V2bX状态: ${green}已运行${plain}"
-            ;;
-        1)
-            echo -e "检测到您未启动V2bX或V2bX自动重启失败，是否查看日志？[Y/n]" && echo
-            read -e -rp "(默认: y):" yn
-            [[ -z ${yn} ]] && yn="y"
-            if [[ ${yn} == [Yy] ]]; then
-               show_log
-            fi
-            ;;
-        2)
-            echo -e "V2bX状态: ${red}未安装${plain}"
-    esac
-}
-
-uninstall() {
-    confirm "确定要卸载 V2bX 吗?" "n"
-    if [[ $? != 0 ]]; then
-        if [[ $# == 0 ]]; then
-            show_menu
-        fi
-        return 0
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        service V2bX stop
-        rc-update del V2bX
-        rm /etc/init.d/V2bX -f
+enabled() {
+    if $openrc; then
+        rc-update show 2>/dev/null | grep -q V2bX
     else
-        systemctl stop V2bX
-        systemctl disable V2bX
-        rm /etc/systemd/system/V2bX.service -f
-        systemctl daemon-reload
-        systemctl reset-failed
-    fi
-    rm /etc/V2bX/ -rf
-    rm /usr/local/V2bX/ -rf
-
-    echo ""
-    echo -e "卸载成功，如果你想删除此脚本，则退出脚本后运行 ${green}rm /usr/bin/V2bX -f${plain} 进行删除"
-    echo ""
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
+        systemctl is-enabled --quiet V2bX 2>/dev/null
     fi
 }
+
+need_install() {
+    installed && return 0
+    echo -e "${red}V2bX 未安装${plain}"
+    return 1
+}
+
+version() {
+    local f v
+    for f in /etc/V2bX/.panel_version /usr/local/V2bX/.version; do
+        [[ -s $f ]] && v=$(head -n1 "$f") && [[ -n $v ]] && echo "$v" && return
+    done
+    installed && $bin version 2>/dev/null | awk 'NF {last=$2} END {print last}'
+}
+
+pause() {
+    [[ -n $cli ]] && return
+    echo && read -rp "按回车返回主菜单" _
+}
+
+# 等服务状态稳定再判断，避免 Restart=always 的抖动误报
+wait_state() {
+    local want=$1 i
+    for i in 1 2 3 4 5; do
+        sleep 1
+        if [[ $want == up ]]; then running && return 0; else running || return 0; fi
+    done
+    return 1
+}
+
+# ---------- 服务操作 ----------
 
 start() {
-    check_status
-    if [[ $? == 0 ]]; then
-        echo ""
-        echo -e "${green}V2bX已运行，无需再次启动，如需重启请选择重启${plain}"
-    else
-        if [[ x"${release}" == x"alpine" ]]; then
-            service V2bX start
-        else
-            systemctl start V2bX
-        fi
-        sleep 2
-        check_status
-        if [[ $? == 0 ]]; then
-            echo -e "${green}V2bX 启动成功，请使用 V2bX log 查看运行日志${plain}"
-        else
-            echo -e "${red}V2bX可能启动失败，请稍后使用 V2bX log 查看日志信息${plain}"
-        fi
+    if running; then
+        echo -e "${green}V2bX 已在运行${plain}"
+        return
     fi
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    svc start
+    if wait_state up; then echo -e "${green}V2bX 启动成功${plain}"; else echo -e "${red}V2bX 启动失败，请查看日志${plain}"; fi
 }
 
 stop() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service V2bX stop
-    else
-        systemctl stop V2bX
-    fi
-    sleep 2
-    check_status
-    if [[ $? == 1 ]]; then
-        echo -e "${green}V2bX 停止成功${plain}"
-    else
-        echo -e "${red}V2bX停止失败，可能是因为停止时间超过了两秒，请稍后查看日志信息${plain}"
-    fi
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    svc stop
+    if wait_state down; then echo -e "${green}V2bX 已停止${plain}"; else echo -e "${red}V2bX 停止失败${plain}"; fi
 }
 
 restart() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service V2bX restart
-    else
-        systemctl restart V2bX
-    fi
-    sleep 2
-    check_status
-    if [[ $? == 0 ]]; then
-        echo -e "${green}V2bX 重启成功，请使用 V2bX log 查看运行日志${plain}"
-    else
-        echo -e "${red}V2bX可能启动失败，请稍后使用 V2bX log 查看日志信息${plain}"
-    fi
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    svc restart
+    if wait_state up; then echo -e "${green}V2bX 重启成功${plain}"; else echo -e "${red}V2bX 启动失败，请查看日志${plain}"; fi
 }
 
 status() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        service V2bX status
-    else
-        systemctl status V2bX --no-pager -l
-    fi
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
-}
-
-enable() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update add V2bX
-    else
-        systemctl enable V2bX
-    fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}V2bX 设置开机自启成功${plain}"
-    else
-        echo -e "${red}V2bX 设置开机自启失败${plain}"
-    fi
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
-}
-
-disable() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        rc-update del V2bX
-    else
-        systemctl disable V2bX
-    fi
-    if [[ $? == 0 ]]; then
-        echo -e "${green}V2bX 取消开机自启成功${plain}"
-    else
-        echo -e "${red}V2bX 取消开机自启失败${plain}"
-    fi
-
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
+    if $openrc; then service V2bX status; else systemctl status V2bX --no-pager -l; fi
 }
 
 show_log() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        echo -e "${red}alpine系统暂不支持日志查看${plain}\n" && exit 1
-    else
-        journalctl -u V2bX.service -e --no-pager -f
+    if $openrc; then
+        echo -e "${red}alpine 暂不支持查看日志${plain}"
+        return 1
     fi
-    if [[ $# == 0 ]]; then
-        before_show_menu
+    echo -e "${gray}Ctrl+C 退出日志${plain}"
+    trap ':' INT
+    journalctl -u V2bX -n 200 --no-pager -f
+    trap - INT
+}
+
+toggle_enable() {
+    if enabled; then
+        svc disable >/dev/null 2>&1 && echo -e "${green}已取消开机自启${plain}"
+    else
+        svc enable >/dev/null 2>&1 && echo -e "${green}已设置开机自启${plain}"
     fi
 }
 
-install_bbr() {
-    bash <(curl -L -s https://github.com/ylx2016/Linux-NetSpeed/raw/master/tcpx.sh)
+# ---------- 安装与更新 ----------
+
+do_install() {
+    if installed; then
+        echo -e "${yellow}V2bX 已安装，如需更新请选择更新${plain}"
+        return
+    fi
+    run_remote install/install.sh "$@"
+}
+
+update() {
+    local ver=$1
+    if [[ -z $cli && -z $ver ]]; then
+        read -rp "输入版本号（回车安装最新版）: " ver
+    fi
+    is_machine && echo -e "${gray}提示：机器模式可直接在面板「升级 V2bX」${plain}"
+    run_remote install/install.sh $ver && echo -e "${green}更新完成${plain}"
 }
 
 update_shell() {
-    wget -O /usr/bin/V2bX -N --no-check-certificate https://raw.githubusercontent.com/svip7788/V2bX-pro/master/install/V2bX.sh
-    if [[ $? != 0 ]]; then
-        echo ""
-        echo -e "${red}下载脚本失败，请检查本机能否连接 Github${plain}"
-        before_show_menu
-    else
-        chmod +x /usr/bin/V2bX
-        echo -e "${green}升级脚本成功，请重新运行脚本${plain}" && exit 0
-    fi
-}
-
-# 0: running, 1: not running, 2: not installed
-check_status() {
-    if [[ ! -f /usr/local/V2bX/V2bX ]]; then
-        return 2
-    fi
-    if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(service V2bX status | awk '{print $3}')
-        if [[ x"${temp}" == x"started" ]]; then
-            return 0
-        else
-            return 1
-        fi
-    else
-        if systemctl is-active --quiet V2bX; then
-            return 0
-        else
-            return 1
-        fi
-    fi
-}
-
-check_enabled() {
-    if [[ x"${release}" == x"alpine" ]]; then
-        temp=$(rc-update show | grep V2bX)
-        if [[ x"${temp}" == x"" ]]; then
-            return 1
-        else
-            return 0
-        fi
-    else
-        temp=$(systemctl is-enabled V2bX)
-        if [[ x"${temp}" == x"enabled" ]]; then
-            return 0
-        else
-            return 1;
-        fi
-    fi
-}
-
-check_uninstall() {
-    check_status
-    if [[ $? != 2 ]]; then
-        echo ""
-        echo -e "${red}V2bX已安装，请不要重复安装${plain}"
-        if [[ $# == 0 ]]; then
-            before_show_menu
-        fi
-        return 1
-    else
-        return 0
-    fi
-}
-
-check_install() {
-    check_status
-    if [[ $? == 2 ]]; then
-        echo ""
-        echo -e "${red}请先安装V2bX${plain}"
-        if [[ $# == 0 ]]; then
-            before_show_menu
-        fi
-        return 1
-    else
-        return 0
-    fi
-}
-
-show_status() {
-    check_status
-    case $? in
-        0)
-            echo -e "V2bX状态: ${green}已运行${plain}"
-            show_enable_status
-            ;;
-        1)
-            echo -e "V2bX状态: ${yellow}未运行${plain}"
-            show_enable_status
-            ;;
-        2)
-            echo -e "V2bX状态: ${red}未安装${plain}"
-    esac
-}
-
-show_enable_status() {
-    check_enabled
-    if [[ $? == 0 ]]; then
-        echo -e "是否开机自启: ${green}是${plain}"
-    else
-        echo -e "是否开机自启: ${red}否${plain}"
-    fi
-}
-
-generate_x25519_key() {
-    echo -n "正在生成 x25519 密钥："
-    /usr/local/V2bX/V2bX x25519
-    echo ""
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
-}
-
-show_V2bX_version() {
-    echo -n "V2bX 版本："
-    /usr/local/V2bX/V2bX version
-    echo ""
-    if [[ $# == 0 ]]; then
-        before_show_menu
-    fi
-}
-
-add_node_config() {
-    echo -e "${green}请选择节点核心类型：${plain}"
-    echo -e "${green}1. xray${plain}"
-    echo -e "${green}2. singbox${plain}"
-    echo -e "${green}3. hysteria2${plain}"
-    read -rp "请输入：" core_type
-    if [ "$core_type" == "1" ]; then
-        core="xray"
-        core_xray=true
-    elif [ "$core_type" == "2" ]; then
-        core="sing"
-        core_sing=true
-    elif [ "$core_type" == "3" ]; then
-        core="hysteria2"
-        core_hysteria2=true
-    else
-        echo "无效的选择。请选择 1 2 3。"
-        continue
-    fi
-    while true; do
-        read -rp "请输入节点Node ID：" NodeID
-        # 判断NodeID是否为正整数
-        if [[ "$NodeID" =~ ^[0-9]+$ ]]; then
-            break  # 输入正确，退出循环
-        else
-            echo "错误：请输入正确的数字作为Node ID。"
-        fi
-    done
-
-    if [ "$core_hysteria2" = true ] && [ "$core_xray" = false ] && [ "$core_sing" = false ]; then
-        NodeType="hysteria2"
-    else
-        echo -e "${yellow}请选择节点传输协议：${plain}"
-        echo -e "${green}1. Shadowsocks${plain}"
-        echo -e "${green}2. Vless${plain}"
-        echo -e "${green}3. Vmess${plain}"
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}4. Hysteria${plain}"
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        if [ "$core_hysteria2" == true ] && [ "$core_sing" = false ]; then
-            echo -e "${green}5. Hysteria2${plain}"
-        fi
-        echo -e "${green}6. Trojan${plain}"  
-        if [ "$core_sing" == true ]; then
-            echo -e "${green}7. Tuic${plain}"
-            echo -e "${green}8. AnyTLS${plain}"
-        fi
-        read -rp "请输入：" NodeType
-        case "$NodeType" in
-            1 ) NodeType="shadowsocks" ;;
-            2 ) NodeType="vless" ;;
-            3 ) NodeType="vmess" ;;
-            4 ) NodeType="hysteria" ;;
-            5 ) NodeType="hysteria2" ;;
-            6 ) NodeType="trojan" ;;
-            7 ) NodeType="tuic" ;;
-            8 ) NodeType="anytls" ;;
-            * ) NodeType="shadowsocks" ;;
-        esac
-    fi
-    fastopen=true
-    if [ "$NodeType" == "vless" ]; then
-        read -rp "请选择是否为reality节点？(y/n)" isreality
-    elif [ "$NodeType" == "hysteria" ] || [ "$NodeType" == "hysteria2" ] || [ "$NodeType" == "tuic" ] || [ "$NodeType" == "anytls" ]; then
-        fastopen=false
-        istls="y"
-    fi
-
-    if [[ "$isreality" != "y" && "$isreality" != "Y" &&  "$istls" != "y" ]]; then
-        read -rp "请选择是否进行TLS配置？(y/n)" istls
-    fi
-
-    certmode="none"
-    certdomain="example.com"
-    if [[ "$isreality" != "y" && "$isreality" != "Y" && ( "$istls" == "y" || "$istls" == "Y" ) ]]; then
-        echo -e "${yellow}请选择证书申请模式：${plain}"
-        echo -e "${green}1. http模式自动申请，节点域名已正确解析${plain}"
-        echo -e "${green}2. dns模式自动申请，需填入正确域名服务商API参数${plain}"
-        echo -e "${green}3. self模式，自签证书或提供已有证书文件${plain}"
-        read -rp "请输入：" certmode
-        case "$certmode" in
-            1 ) certmode="http" ;;
-            2 ) certmode="dns" ;;
-            3 ) certmode="self" ;;
-        esac
-        read -rp "请输入节点证书域名(example.com)：" certdomain
-        if [ "$certmode" != "http" ]; then
-            echo -e "${red}请手动修改配置文件后重启V2bX！${plain}"
-        fi
-    fi
-    ipv6_support=$(check_ipv6_support)
-    listen_ip="0.0.0.0"
-    if [ "$ipv6_support" -eq 1 ]; then
-        listen_ip="::"
-    fi
-    node_config=""
-    if [ "$core_type" == "1" ]; then 
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Timeout": 30,
-            "ListenIP": "0.0.0.0",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "EnableProxyProtocol": false,
-            "EnableDNS": true,
-            "EnableUot": true,
-            "EnableTFO": true,
-            "DNSType": "UseIPv4",
-            "DisableSniffing": false,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
-                "CertFile": "/etc/V2bX/fullchain.cer",
-                "KeyFile": "/etc/V2bX/cert.key",
-                "Email": "v2bx@github.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "EnvName": "env1"
-                }
-            }
-        },
-EOF
-)
-    elif [ "$core_type" == "2" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Timeout": 30,
-            "ListenIP": "$listen_ip",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "EnableTFO": $fastopen,
-            "EnableDNS": true,
-            "EnableSniff": true,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
-                "CertFile": "/etc/V2bX/fullchain.cer",
-                "KeyFile": "/etc/V2bX/cert.key",
-                "Email": "v2bx@github.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "EnvName": "env1"
-                }
-            }
-        },
-EOF
-)
-    elif [ "$core_type" == "3" ]; then
-    node_config=$(cat <<EOF
-{
-            "Core": "$core",
-            "ApiHost": "$ApiHost",
-            "ApiKey": "$ApiKey",
-            "NodeID": $NodeID,
-            "NodeType": "$NodeType",
-            "Hysteria2ConfigPath": "/etc/V2bX/hy2config.yaml",
-            "Timeout": 30,
-            "ListenIP": "",
-            "SendIP": "0.0.0.0",
-            "DeviceOnlineMinTraffic": 200,
-            "MinReportTraffic": 0,
-            "CertConfig": {
-                "CertMode": "$certmode",
-                "RejectUnknownSni": false,
-                "CertDomain": "$certdomain",
-                "CertFile": "/etc/V2bX/fullchain.cer",
-                "KeyFile": "/etc/V2bX/cert.key",
-                "Email": "v2bx@github.com",
-                "Provider": "cloudflare",
-                "DNSEnv": {
-                    "EnvName": "env1"
-                }
-            }
-        },
-EOF
-)
-    fi
-    nodes_config+=("$node_config")
-}
-
-generate_config_file() {
-    echo -e "${yellow}V2bX 配置文件生成向导${plain}"
-    echo -e "${red}请阅读以下注意事项：${plain}"
-    echo -e "${red}1. 目前该功能正处测试阶段${plain}"
-    echo -e "${red}2. 生成的配置文件会保存到 /etc/V2bX/config.json${plain}"
-    echo -e "${red}3. 原来的配置文件会保存到 /etc/V2bX/config.json.bak${plain}"
-    echo -e "${red}4. 目前仅部分支持TLS${plain}"
-    echo -e "${red}5. 使用此功能生成的配置文件会自带审计，确定继续？(y/n)${plain}"
-    read -rp "请输入：" continue_prompt
-    if [[ "$continue_prompt" =~ ^[Nn][Oo]? ]]; then
+    local tmp
+    tmp=$(mktemp) || return 1
+    if fetch install/V2bX.sh "$tmp" && bash -n "$tmp"; then
+        install -m 755 "$tmp" /usr/bin/V2bX
+        rm -f "$tmp"
+        echo -e "${green}管理脚本已更新，请重新运行 V2bX${plain}"
         exit 0
     fi
-    
-    nodes_config=()
-    first_node=true
-    core_xray=false
-    core_sing=false
-    fixed_api_info=false
-    check_api=false
-    
-    while true; do
-        if [ "$first_node" = true ]; then
-            read -rp "请输入机场网址(https://example.com)：" ApiHost
-            read -rp "请输入面板对接API Key：" ApiKey
-            read -rp "是否设置固定的机场网址和API Key？(y/n)" fixed_api
-            if [ "$fixed_api" = "y" ] || [ "$fixed_api" = "Y" ]; then
-                fixed_api_info=true
-                echo -e "${red}成功固定地址${plain}"
-            fi
-            first_node=false
-            add_node_config
-        else
-            read -rp "是否继续添加节点配置？(回车继续，输入n或no退出)" continue_adding_node
-            if [[ "$continue_adding_node" =~ ^[Nn][Oo]? ]]; then
-                break
-            elif [ "$fixed_api_info" = false ]; then
-                read -rp "请输入机场网址：" ApiHost
-                read -rp "请输入面板对接API Key：" ApiKey
-            fi
-            add_node_config
-        fi
-    done
-
-    # 初始化核心配置数组
-    cores_config="["
-
-    # 检查并添加xray核心配置
-    if [ "$core_xray" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"xray\",
-        \"Log\": {
-            \"Level\": \"error\",
-            \"ErrorPath\": \"/etc/V2bX/error.log\"
-        },
-        \"DnsConfigPath\": \"/etc/V2bX/dns.json\",
-        \"XrayConnectionConfig\": {
-            \"handshake\": 4,
-            \"connIdle\": 30,
-            \"uplinkOnly\": 2,
-            \"downlinkOnly\": 4,
-            \"bufferSize\": 32
-        },
-        \"OutboundConfigPath\": \"/etc/V2bX/custom_outbound.json\",
-        \"RouteConfigPath\": \"/etc/V2bX/route.json\"
-    },"
-    fi
-
-    # 检查并添加sing核心配置
-    if [ "$core_sing" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"sing\",
-        \"Log\": {
-            \"Level\": \"error\",
-            \"Timestamp\": true
-        },
-        \"NTP\": {
-            \"Enable\": false,
-            \"Server\": \"time.apple.com\",
-            \"ServerPort\": 0
-        },
-        \"OriginalPath\": \"/etc/V2bX/sing_origin.json\"
-    },"
-    fi
-
-    # 检查并添加hysteria2核心配置
-    if [ "$core_hysteria2" = true ]; then
-        cores_config+="
-    {
-        \"Type\": \"hysteria2\",
-        \"Log\": {
-            \"Level\": \"error\"
-        }
-    },"
-    fi
-
-    # 移除最后一个逗号并关闭数组
-    cores_config+="]"
-    cores_config=$(echo "$cores_config" | sed 's/},]$/}]/')
-
-    # 切换到配置文件目录
-    cd /etc/V2bX
-    
-    # 备份旧的配置文件
-    mv config.json config.json.bak
-    nodes_config_str="${nodes_config[*]}"
-    formatted_nodes_config="${nodes_config_str%,}"
-
-    # 创建 config.json 文件
-    cat <<EOF > /etc/V2bX/config.json
-{
-    "Log": {
-        "Level": "error",
-        "Output": ""
-    },
-    "Cores": $cores_config,
-    "Nodes": [$formatted_nodes_config]
-}
-EOF
-    
-    # 创建 custom_outbound.json 文件
-    cat <<EOF > /etc/V2bX/custom_outbound.json
-    [
-        {
-            "tag": "IPv4_out",
-            "protocol": "freedom",
-            "settings": {
-                "domainStrategy": "UseIPv4"
-            }
-        },
-        {
-            "tag": "IPv6_out",
-            "protocol": "freedom",
-            "settings": {
-                "domainStrategy": "UseIPv6"
-            }
-        },
-        {
-            "protocol": "blackhole",
-            "tag": "block"
-        }
-    ]
-EOF
-    
-    # 创建 route.json 文件
-    cat <<EOF > /etc/V2bX/route.json
-    {
-        "domainStrategy": "AsIs",
-        "rules": [
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "ip": [
-                    "geoip:private"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "domain": [
-                    "regexp:(api|ps|sv|offnavi|newvector|ulog.imap|newloc)(.map|).(baidu|n.shifen).com",
-                    "regexp:(.+.|^)(360|so).(cn|com)",
-                    "regexp:(Subject|HELO|SMTP)",
-                    "regexp:(torrent|.torrent|peer_id=|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=)",
-                    "regexp:(^.@)(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168).(info|biz|com|de|net|org|me|la)",
-                    "regexp:(.?)(xunlei|sandai|Thunder|XLLiveUD)(.)",
-                    "regexp:(..||)(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian).(org|com|net)",
-                    "regexp:(ed2k|.torrent|peer_id=|announce|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=|magnet:|xunlei|sandai|Thunder|XLLiveUD|bt_key)",
-                    "regexp:(.+.|^)(360).(cn|com|net)",
-                    "regexp:(.*.||)(guanjia.qq.com|qqpcmgr|QQPCMGR)",
-                    "regexp:(.*.||)(rising|kingsoft|duba|xindubawukong|jinshanduba).(com|net|org)",
-                    "regexp:(.*.||)(netvigator|torproject).(com|cn|net|org)",
-                    "regexp:(..||)(visa|mycard|gash|beanfun|bank).",
-                    "regexp:(.*.||)(gov|12377|12315|talk.news.pts.org|creaders|zhuichaguoji|efcc.org|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|110.qq|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly|cn.rfi).(cn|com|org|net|club|net|fr|tw|hk|eu|info|me)",
-                    "regexp:(.*.||)(miaozhen|cnzz|talkingdata|umeng).(cn|com)",
-                    "regexp:(.*.||)(mycard).(com|tw)",
-                    "regexp:(.*.||)(gash).(com|tw)",
-                    "regexp:(.bank.)",
-                    "regexp:(.*.||)(pincong).(rocks)",
-                    "regexp:(.*.||)(taobao).(com)",
-                    "regexp:(.*.||)(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126).(com|cloud|fun|cn|gs|xyz|cc)",
-                    "regexp:(flows|miaoko).(pages).(dev)"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "ip": [
-                    "127.0.0.1/32",
-                    "10.0.0.0/8",
-                    "fc00::/7",
-                    "fe80::/10",
-                    "172.16.0.0/12"
-                ]
-            },
-            {
-                "type": "field",
-                "outboundTag": "block",
-                "protocol": [
-                    "bittorrent"
-                ]
-            }
-        ]
-    }
-EOF
-
-    ipv6_support=$(check_ipv6_support)
-    dnsstrategy="ipv4_only"
-    if [ "$ipv6_support" -eq 1 ]; then
-        dnsstrategy="prefer_ipv4"
-    fi
-    xray_query_strategy="UseIPv4"
-    if [ "$ipv6_support" -eq 1 ]; then
-        xray_query_strategy="UseIP"
-    fi
-    # 创建 dns.json 文件
-    cat <<EOF > /etc/V2bX/dns.json
-{
-  "servers": [
-    "localhost",
-    "https://1.1.1.1/dns-query",
-    "tcp-tls://1.1.1.1",
-    "tcp://1.1.1.1",
-    "1.1.1.1",
-    "https://8.8.8.8/dns-query",
-    "tcp://8.8.8.8",
-    "8.8.8.8"
-  ],
-  "queryStrategy": "$xray_query_strategy",
-  "tag": "dns_inbound"
-}
-EOF
-    # 创建 sing_origin.json 文件
-    cat <<EOF > /etc/V2bX/sing_origin.json
-{
-  "dns": {
-    "servers": [
-      {
-        "tag": "cf",
-        "address": "1.1.1.1"
-      }
-    ],
-    "strategy": "$dnsstrategy"
-  },
-  "outbounds": [
-    {
-      "tag": "direct",
-      "type": "direct",
-      "domain_resolver": {
-        "server": "cf",
-        "strategy": "$dnsstrategy"
-      }
-    },
-    {
-      "type": "block",
-      "tag": "block"
-    }
-  ],
-  "route": {
-    "rules": [
-      {
-        "ip_is_private": true,
-        "outbound": "block"
-      },
-      {
-        "domain_regex": [
-            "(api|ps|sv|offnavi|newvector|ulog.imap|newloc)(.map|).(baidu|n.shifen).com",
-            "(.+.|^)(360|so).(cn|com)",
-            "(Subject|HELO|SMTP)",
-            "(torrent|.torrent|peer_id=|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=)",
-            "(^.@)(guerrillamail|guerrillamailblock|sharklasers|grr|pokemail|spam4|bccto|chacuo|027168).(info|biz|com|de|net|org|me|la)",
-            "(.?)(xunlei|sandai|Thunder|XLLiveUD)(.)",
-            "(..||)(dafahao|mingjinglive|botanwang|minghui|dongtaiwang|falunaz|epochtimes|ntdtv|falundafa|falungong|wujieliulan|zhengjian).(org|com|net)",
-            "(ed2k|.torrent|peer_id=|announce|info_hash|get_peers|find_node|BitTorrent|announce_peer|announce.php?passkey=|magnet:|xunlei|sandai|Thunder|XLLiveUD|bt_key)",
-            "(.+.|^)(360).(cn|com|net)",
-            "(.*.||)(guanjia.qq.com|qqpcmgr|QQPCMGR)",
-            "(.*.||)(rising|kingsoft|duba|xindubawukong|jinshanduba).(com|net|org)",
-            "(.*.||)(netvigator|torproject).(com|cn|net|org)",
-            "(..||)(visa|mycard|gash|beanfun|bank).",
-            "(.*.||)(gov|12377|12315|talk.news.pts.org|creaders|zhuichaguoji|efcc.org|cyberpolice|aboluowang|tuidang|epochtimes|zhengjian|110.qq|mingjingnews|inmediahk|xinsheng|breakgfw|chengmingmag|jinpianwang|qi-gong|mhradio|edoors|renminbao|soundofhope|xizang-zhiye|bannedbook|ntdtv|12321|secretchina|dajiyuan|boxun|chinadigitaltimes|dwnews|huaglad|oneplusnews|epochweekly|cn.rfi).(cn|com|org|net|club|net|fr|tw|hk|eu|info|me)",
-            "(.*.||)(miaozhen|cnzz|talkingdata|umeng).(cn|com)",
-            "(.*.||)(mycard).(com|tw)",
-            "(.*.||)(gash).(com|tw)",
-            "(.bank.)",
-            "(.*.||)(pincong).(rocks)",
-            "(.*.||)(taobao).(com)",
-            "(.*.||)(laomoe|jiyou|ssss|lolicp|vv1234|0z|4321q|868123|ksweb|mm126).(com|cloud|fun|cn|gs|xyz|cc)",
-            "(flows|miaoko).(pages).(dev)"
-        ],
-        "outbound": "block"
-      },
-      {
-        "outbound": "direct",
-        "network": [
-          "udp","tcp"
-        ]
-      }
-    ]
-  },
-  "experimental": {
-    "cache_file": {
-      "enabled": true
-    }
-  }
-}
-EOF
-
-    # 创建 hy2config.yaml 文件           
-    cat <<EOF > /etc/V2bX/hy2config.yaml
-quic:
-  initStreamReceiveWindow: 8388608
-  maxStreamReceiveWindow: 8388608
-  initConnReceiveWindow: 20971520
-  maxConnReceiveWindow: 20971520
-  maxIdleTimeout: 30s
-  maxIncomingStreams: 1024
-  disablePathMTUDiscovery: false
-ignoreClientBandwidth: false
-disableUDP: false
-udpIdleTimeout: 60s
-resolver:
-  type: system
-acl:
-  inline:
-    - direct(geosite:google)
-    - reject(geosite:cn)
-    - reject(geoip:cn)
-masquerade:
-  type: 404
-EOF
-    echo -e "${green}V2bX 配置文件生成完成，正在重新启动 V2bX 服务${plain}"
-    restart 0
-    before_show_menu
+    rm -f "$tmp"
+    echo -e "${red}下载管理脚本失败${plain}"
 }
 
-# 放开防火墙端口
+uninstall() {
+    read -rp "确定卸载 V2bX？配置文件 /etc/V2bX 将一并删除 [y/N]: " yn
+    [[ $yn == [Yy] ]] || return
+    svc stop >/dev/null 2>&1
+    svc disable >/dev/null 2>&1
+    if $openrc; then
+        rm -f /etc/init.d/V2bX
+    else
+        rm -f /etc/systemd/system/V2bX.service
+        rm -rf /etc/systemd/system/V2bX.service.d
+        systemctl daemon-reload
+        systemctl reset-failed 2>/dev/null
+    fi
+    rm -rf /etc/V2bX /usr/local/V2bX
+    echo -e "${green}卸载完成${plain}，如需删除本脚本：rm -f /usr/bin/V2bX /usr/bin/v2bx"
+    exit 0
+}
+
+# ---------- 配置与工具 ----------
+
+is_machine() { [[ -f $conf ]] && grep -q '"Machines\?"' "$conf"; }
+
+edit_config() {
+    is_machine && echo -e "${yellow}机器模式：节点配置由面板下发，这里只有面板对接信息${plain}" && sleep 1
+    ${EDITOR:-vi} "$conf"
+    read -rp "是否重启 V2bX 使配置生效？[Y/n]: " yn
+    [[ $yn == [Nn] ]] || restart
+}
+
+# 单节点模式的配置生成向导，与安装时首次配置共用
+generate() {
+    if is_machine; then
+        echo -e "${red}当前为机器模式，配置由面板管理，生成配置会覆盖面板对接信息${plain}"
+        read -rp "仍要继续？[y/N]: " yn
+        [[ $yn == [Yy] ]] || return
+    fi
+    local tmp
+    tmp=$(mktemp) || return 1
+    fetch install/initconfig.sh "$tmp" || { rm -f "$tmp"; echo -e "${red}下载配置向导失败${plain}"; return 1; }
+    # shellcheck disable=SC1090
+    source "$tmp"
+    rm -f "$tmp"
+    generate_config_file
+}
+
+bbr_on() { [[ $(sysctl -n net.ipv4.tcp_congestion_control 2>/dev/null) == bbr ]]; }
+
+enable_bbr() {
+    if bbr_on; then
+        echo -e "${green}BBR 已开启${plain}"
+        return
+    fi
+    local tmp
+    tmp=$(mktemp) || return 1
+    fetch machine/scripts/bbr.sh "$tmp" && sh "$tmp"
+    rm -f "$tmp"
+}
+
+tune() {
+    [[ -f /etc/sysctl.d/99-v2bx-performance.conf ]] || { echo -e "${red}未找到 /etc/sysctl.d/99-v2bx-performance.conf${plain}"; return 1; }
+    sysctl --system >/dev/null && echo -e "${green}内核参数已重载${plain}"
+}
+
 open_ports() {
-    systemctl stop firewalld.service 2>/dev/null
-    systemctl disable firewalld.service 2>/dev/null
-    setenforce 0 2>/dev/null
+    read -rp "将关闭 firewalld/ufw 并清空 iptables 规则，确定？[y/N]: " yn
+    [[ $yn == [Yy] ]] || return
+    systemctl disable --now firewalld 2>/dev/null
     ufw disable 2>/dev/null
+    setenforce 0 2>/dev/null
     iptables -P INPUT ACCEPT 2>/dev/null
     iptables -P FORWARD ACCEPT 2>/dev/null
     iptables -P OUTPUT ACCEPT 2>/dev/null
@@ -966,131 +253,126 @@ open_ports() {
     iptables -F 2>/dev/null
     iptables -X 2>/dev/null
     netfilter-persistent save 2>/dev/null
-    echo -e "${green}放开防火墙端口成功！${plain}"
+    echo -e "${green}已放行全部端口${plain}"
 }
 
-apply_performance_tuning() {
-    if [[ ! -f /etc/sysctl.d/99-v2bx-performance.conf ]]; then
-        echo -e "${red}未找到 /etc/sysctl.d/99-v2bx-performance.conf${plain}"
-        return 1
-    fi
-    sysctl --system
+x25519() { need_install && $bin x25519; }
+
+pprof() {
+    [[ -n $1 ]] || { echo "用法: V2bX pprof <listen_addr> [seconds] [output_dir]"; return 1; }
+    [[ -x /usr/local/V2bX/collect_pprof.sh ]] || { echo -e "${red}未找到 collect_pprof.sh${plain}"; return 1; }
+    /usr/local/V2bX/collect_pprof.sh "$1" "${2:-20}" "${3:-/tmp/v2bx-pprof-$(date +%Y%m%d-%H%M%S)}"
 }
 
-capture_pprof() {
-    local listen_addr="$2"
-    local seconds="${3:-20}"
-    local output_dir="${4:-/tmp/v2bx-pprof-$(date +%Y%m%d-%H%M%S)}"
-    if [[ -z "${listen_addr}" ]]; then
-        echo -e "${red}用法: V2bX pprof <listen_addr> [seconds] [output_dir]${plain}"
-        return 1
+# ---------- 菜单 ----------
+
+uptime_text() {
+    local ts s
+    ts=$(systemctl show V2bX -p ActiveEnterTimestamp --value 2>/dev/null)
+    ts=$(date -d "$ts" +%s 2>/dev/null) || return
+    s=$(($(date +%s) - ts))
+    if ((s >= 86400)); then
+        echo "$((s / 86400)) 天 $((s % 86400 / 3600)) 小时"
+    elif ((s >= 3600)); then
+        echo "$((s / 3600)) 小时 $((s % 3600 / 60)) 分"
+    else
+        echo "$((s / 60)) 分钟"
     fi
-    if [[ ! -x /usr/local/V2bX/collect_pprof.sh ]]; then
-        echo -e "${red}未找到 /usr/local/V2bX/collect_pprof.sh${plain}"
-        return 1
-    fi
-    /usr/local/V2bX/collect_pprof.sh "${listen_addr}" "${seconds}" "${output_dir}"
 }
 
-show_usage() {
-    echo "V2bX 管理脚本使用方法: "
-    echo "------------------------------------------"
-    echo "V2bX              - 显示管理菜单 (功能更多)"
-    echo "V2bX start        - 启动 V2bX"
-    echo "V2bX stop         - 停止 V2bX"
-    echo "V2bX restart      - 重启 V2bX"
-    echo "V2bX status       - 查看 V2bX 状态"
-    echo "V2bX enable       - 设置 V2bX 开机自启"
-    echo "V2bX disable      - 取消 V2bX 开机自启"
-    echo "V2bX log          - 查看 V2bX 日志"
-    echo "V2bX x25519       - 生成 x25519 密钥"
-    echo "V2bX generate     - 生成 V2bX 配置文件"
-    echo "V2bX update       - 更新 V2bX"
-    echo "V2bX update x.x.x - 安装 V2bX 指定版本"
-    echo "V2bX install      - 安装 V2bX"
-    echo "V2bX uninstall    - 卸载 V2bX"
-    echo "V2bX tune         - 重载高并发内核参数"
-    echo "V2bX pprof        - 抓取运行中实例的 pprof"
-    echo "V2bX version      - 查看 V2bX 版本"
-    echo "------------------------------------------"
+header() {
+    local state boot mode bbr since
+    if ! installed; then
+        state="${red}未安装${plain}"
+    elif running; then
+        $openrc || since=$(uptime_text)
+        state="${green}运行中${plain}${since:+ ${gray}(已运行 ${since})${plain}}"
+    else
+        state="${red}未运行${plain}"
+    fi
+    enabled && boot="${green}是${plain}" || boot="${yellow}否${plain}"
+    bbr_on && bbr="${green}已开启${plain}" || bbr="${yellow}未开启${plain}（V2bX bbr）"
+    if is_machine; then
+        mode="机器模式 · $(grep -o '"ApiHost": *"[^"]*"' "$conf" | sed -E 's/.*"https?:\/\/([^"/]+).*/\1/' | sort -u | paste -sd ' ' -)"
+    elif [[ -f $conf ]]; then
+        mode="单节点模式"
+    fi
+    echo -e "
+  ${green}V2bX 管理脚本${plain}  ${gray}github.com/${repo}${plain}
+  版本: ${green}$(version)${plain}${mode:+   ${mode}}
+  状态: ${state}   开机自启: ${boot}   BBR: ${bbr}"
 }
 
 show_menu() {
-    echo -e "
-  ${green}V2bX 后端管理脚本，${plain}${red}不适用于docker${plain}
---- https://github.com/svip7788/V2bX-pro ---
-  ${green}0.${plain} 修改配置
-————————————————
-  ${green}1.${plain} 安装 V2bX
-  ${green}2.${plain} 更新 V2bX
-  ${green}3.${plain} 卸载 V2bX
-————————————————
-  ${green}4.${plain} 启动 V2bX
-  ${green}5.${plain} 停止 V2bX
-  ${green}6.${plain} 重启 V2bX
-  ${green}7.${plain} 查看 V2bX 状态
-  ${green}8.${plain} 查看 V2bX 日志
-————————————————
-  ${green}9.${plain} 设置 V2bX 开机自启
-  ${green}10.${plain} 取消 V2bX 开机自启
-————————————————
-  ${green}11.${plain} 一键安装 bbr (最新内核)
-  ${green}12.${plain} 查看 V2bX 版本
-  ${green}13.${plain} 生成 X25519 密钥
-  ${green}14.${plain} 升级 V2bX 维护脚本
-  ${green}15.${plain} 生成 V2bX 配置文件
-  ${green}16.${plain} 放行 VPS 的所有网络端口
-  ${green}17.${plain} 退出脚本
- "
- #后续更新可加入上方字符串中
-    show_status
-    echo && read -rp "请输入选择 [0-17]: " num
-
-    case "${num}" in
-        0) config ;;
-        1) check_uninstall && install ;;
-        2) check_install && update ;;
-        3) check_install && uninstall ;;
-        4) check_install && start ;;
-        5) check_install && stop ;;
-        6) check_install && restart ;;
-        7) check_install && status ;;
-        8) check_install && show_log ;;
-        9) check_install && enable ;;
-        10) check_install && disable ;;
-        11) install_bbr ;;
-        12) check_install && show_V2bX_version ;;
-        13) check_install && generate_x25519_key ;;
-        14) update_shell ;;
-        15) generate_config_file ;;
-        16) open_ports ;;
-        17) exit ;;
-        *) echo -e "${red}请输入正确的数字 [0-16]${plain}" ;;
-    esac
+    while true; do
+        header
+        echo -e "  ————————————————————————————
+  ${green}1.${plain} 启动      ${green}2.${plain} 停止      ${green}3.${plain} 重启
+  ${green}4.${plain} 运行状态  ${green}5.${plain} 实时日志  ${green}6.${plain} 开机自启开关
+  ————————————————————————————
+  ${green}7.${plain} 更新 V2bX   ${green}8.${plain} 更新管理脚本   ${green}9.${plain} 编辑配置
+  ${green}10.${plain} 生成 X25519 密钥   ${green}11.${plain} 放行全部端口
+  ————————————————————————————
+  ${green}i.${plain} 安装   ${red}u.${plain} 卸载   ${green}0.${plain} 退出"
+        echo && read -rp "请选择: " num
+        echo
+        case $num in
+            1) need_install && start ;;
+            2) need_install && stop ;;
+            3) need_install && restart ;;
+            4) need_install && status ;;
+            5) need_install && show_log ;;
+            6) need_install && toggle_enable ;;
+            7) need_install && update ;;
+            8) update_shell ;;
+            9) need_install && edit_config ;;
+            10) x25519 ;;
+            11) open_ports ;;
+            i | I) do_install ;;
+            u | U) need_install && uninstall ;;
+            0 | q | "") exit 0 ;;
+            *) echo -e "${red}无效选择${plain}" ;;
+        esac
+        pause
+    done
 }
 
+usage() {
+    echo "用法: V2bX [命令]（不带命令打开菜单，大小写不敏感）
+  start | stop | restart | status | log   服务控制
+  enable | disable                        开机自启
+  update [版本]                           更新 V2bX
+  update_shell                            更新管理脚本
+  install | uninstall                     安装 / 卸载
+  config                                  编辑配置
+  generate                                单节点模式配置向导
+  x25519                                  生成 X25519 密钥
+  bbr                                     开启 BBR
+  tune                                    重载内核参数
+  pprof <addr> [秒] [目录]                抓取 pprof
+  version                                 查看版本"
+}
 
-if [[ $# > 0 ]]; then
-    case $1 in
-        "start") check_install 0 && start 0 ;;
-        "stop") check_install 0 && stop 0 ;;
-        "restart") check_install 0 && restart 0 ;;
-        "status") check_install 0 && status 0 ;;
-        "enable") check_install 0 && enable 0 ;;
-        "disable") check_install 0 && disable 0 ;;
-        "log") check_install 0 && show_log 0 ;;
-        "update") check_install 0 && update 0 $2 ;;
-        "config") config $* ;;
-        "generate") generate_config_file ;;
-        "install") check_uninstall 0 && install 0 ;;
-        "uninstall") check_install 0 && uninstall 0 ;;
-        "tune") apply_performance_tuning ;;
-        "pprof") capture_pprof "$@" ;;
-        "x25519") check_install 0 && generate_x25519_key 0 ;;
-        "version") check_install 0 && show_V2bX_version 0 ;;
-        "update_shell") update_shell ;;
-        *) show_usage
-    esac
-else
+if [[ $# -eq 0 ]]; then
     show_menu
 fi
+
+cli=1
+cmd=${1,,}
+case $cmd in
+    start | stop | restart | status) need_install && $cmd ;;
+    log) need_install && show_log ;;
+    enable | disable) need_install && svc "$cmd" ;;
+    update) need_install && update "$2" ;;
+    update_shell) update_shell ;;
+    install) shift; do_install "$@" ;;
+    uninstall) need_install && uninstall ;;
+    config) need_install && edit_config ;;
+    generate) generate ;;
+    x25519) x25519 ;;
+    bbr) enable_bbr ;;
+    tune) tune ;;
+    pprof) shift; pprof "$@" ;;
+    version) version ;;
+    *) usage ;;
+esac
