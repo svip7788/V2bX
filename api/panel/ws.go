@@ -58,6 +58,12 @@ type WSClient struct {
 	nodeType string
 	// >0 时为机器级连接：整台机器一条连接，事件 data 内带 node_id
 	machineID int
+	// 返回 true 表示已处理，不进事件队列（终端按键等高频事件，避免占满队列触发全量同步）
+	direct atomic.Pointer[func(WSEvent) bool]
+}
+
+func (ws *WSClient) SetDirectHandler(fn func(WSEvent) bool) {
+	ws.direct.Store(&fn)
 }
 
 func (ws *WSClient) queueEvent(evt WSEvent) {
@@ -200,6 +206,10 @@ func (ws *WSClient) readLoop() {
 
 		if evt.Event == "error" {
 			log.WithField("data", string(evt.Data)).Error("WS received error event")
+			continue
+		}
+
+		if fn := ws.direct.Load(); fn != nil && (*fn)(evt) {
 			continue
 		}
 

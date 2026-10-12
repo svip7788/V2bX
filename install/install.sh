@@ -336,6 +336,15 @@ EOF
         cp 99-v2bx-performance.conf /etc/sysctl.d/99-v2bx-performance.conf
     fi
     sysctl --system >/dev/null 2>&1 || true
+    if [[ $machine_mode == true ]]; then
+        local bbr_url="https://raw.githubusercontent.com/${repo}/HEAD/machine/scripts/bbr.sh"
+        if curl -fsSL --connect-timeout 10 -o /tmp/v2bx-bbr.sh "$bbr_url" || curl -fsSL --connect-timeout 15 -o /tmp/v2bx-bbr.sh "https://ghfast.top/${bbr_url}"; then
+            sh /tmp/v2bx-bbr.sh || true
+        else
+            echo -e "${yellow}下载 BBR 脚本失败，可稍后在面板执行${plain}"
+        fi
+        rm -f /tmp/v2bx-bbr.sh
+    fi
     chmod +x /usr/local/V2bX/collect_pprof.sh 2>/dev/null || true
     curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/${repo}/HEAD/install/V2bX.sh
     chmod +x /usr/bin/V2bX

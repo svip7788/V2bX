@@ -52,6 +52,7 @@ type Manager struct {
 	hasFailedNodes atomic.Bool
 
 	commands *commandRunner
+	terms    *terminals
 	ctx      context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
@@ -76,6 +77,7 @@ func NewManager(cfg *conf.MachineConfig, core vCore.Core, coreTypes []string, ve
 	}
 	m.pullInterval.Store(int64(defaultPullInterval))
 	m.commands = newCommandRunner(m)
+	m.terms = newTerminals(m)
 	return m, nil
 }
 
@@ -150,6 +152,7 @@ func (m *Manager) connectWS() {
 		log.WithField("err", err).Warn("Machine WS connect failed, will retry later")
 		return
 	}
+	ws.SetDirectHandler(func(evt panel.WSEvent) bool { return m.terms.handle(evt.Event, evt.Data) })
 	m.wsMu.Lock()
 	m.ws = ws
 	m.wsMu.Unlock()
