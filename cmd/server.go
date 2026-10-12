@@ -1,6 +1,11 @@
 package cmd
 
 import (
+	"os"
+	"runtime/debug"
+	"strconv"
+	"strings"
+
 	"github.com/InazumaV/V2bX/conf"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -39,6 +44,7 @@ func init() {
 func serverHandle(_ *cobra.Command, _ []string) {
 	if childGroupIndex == 0 {
 		showVersion()
+		applyMemoryLimit()
 	}
 	c := conf.New()
 	err := c.LoadFromPath(config)
@@ -74,6 +80,34 @@ func serverHandle(_ *cobra.Command, _ []string) {
 	if err := runMasterServer(c, config, watch); err != nil {
 		log.WithField("err", err).Error("Run master server failed")
 	}
+}
+
+// applyMemoryLimit 未显式设置 GOMEMLIMIT 时按物理内存 75% 设软上限：
+// 平时不影响，连接数暴涨接近上限时 GC 提前回收，避免整机 OOM
+func applyMemoryLimit() {
+	if os.Getenv("GOMEMLIMIT") != "" {
+		return
+	}
+	b, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return
+	}
+	var kb int64
+	for _, line := range strings.Split(string(b), "\n") {
+		if strings.HasPrefix(line, "MemTotal:") {
+			fields := strings.Fields(line)
+			if len(fields) >= 2 {
+				kb, _ = strconv.ParseInt(fields[1], 10, 64)
+			}
+			break
+		}
+	}
+	if kb <= 0 {
+		return
+	}
+	limit := kb * 1024 / 4 * 3
+	debug.SetMemoryLimit(limit)
+	log.Infof("Go memory limit set to %d MiB", limit>>20)
 }
 
 func applyServerRuntimeOverrides(c *conf.Conf) {
