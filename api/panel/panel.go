@@ -60,6 +60,9 @@ func (c *Client) apiPath(v1Path string) string {
 	return "/api/v2/server/" + v1Path[strings.LastIndex(v1Path, "/")+1:]
 }
 
+// UserAgent 面板常挂宝塔 WAF，Go 默认 UA 在其黑名单里，WS 握手会被拦截并封 IP
+var UserAgent = "V2bX"
+
 func newRestyClient(c *conf.ApiConfig) *resty.Client {
 	var client *resty.Client
 	if c.APISendIP != "" {
@@ -69,6 +72,7 @@ func newRestyClient(c *conf.ApiConfig) *resty.Client {
 	} else {
 		client = resty.New()
 	}
+	client.SetHeader("User-Agent", UserAgent)
 	// Do not auto-retry panel requests. Traffic report APIs are POST and
 	// not guaranteed to be idempotent, so retries can duplicate usage.
 	if c.Timeout > 0 {

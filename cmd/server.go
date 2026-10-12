@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/InazumaV/V2bX/api/panel"
 	"github.com/InazumaV/V2bX/conf"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -42,6 +43,7 @@ func init() {
 }
 
 func serverHandle(_ *cobra.Command, _ []string) {
+	panel.UserAgent = "V2bX/" + version
 	if childGroupIndex == 0 {
 		showVersion()
 		applyMemoryLimit()

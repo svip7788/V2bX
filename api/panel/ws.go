@@ -3,6 +3,7 @@ package panel
 import (
 	"fmt"
 	"math/rand"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -144,7 +145,7 @@ func (ws *WSClient) connect(wsURL string) error {
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
-	conn, _, err := dialer.Dial(u.String(), nil)
+	conn, _, err := dialer.Dial(u.String(), http.Header{"User-Agent": {UserAgent}})
 	if err != nil {
 		return fmt.Errorf("ws dial error: %w", err)
 	}
