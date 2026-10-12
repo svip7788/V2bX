@@ -157,6 +157,8 @@ func defaultMachineXrayConfig() *XrayConfig {
 	x := NewXrayConfig()
 	x.AssetPath = MachineAssetDir
 	x.LogConfig.Level = "error"
+	// 留空时 xray 会把每条连接的 access 日志写到 stdout，高并发下 journald 写盘明显吃 CPU
+	x.LogConfig.AccessPath = "none"
 	x.LogConfig.ErrorPath = ""
 	// dns/route/outbound 由 resolveOptionalConfigPath 在文件存在时自动使用
 	if p := machineAsset("custom_inbound.json"); p != "" {

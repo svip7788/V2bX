@@ -33,7 +33,7 @@ func NewXrayConfig() *XrayConfig {
 	return &XrayConfig{
 		LogConfig: &XrayLogConfig{
 			Level:      "warning",
-			AccessPath: "",
+			AccessPath: "none",
 			ErrorPath:  "",
 		},
 		AssetPath:          "/etc/V2bX/",
