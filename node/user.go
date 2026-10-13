@@ -53,10 +53,7 @@ func (c *Controller) reportUserTrafficTask() (err error) {
 		}
 	}
 
-	if len(userTraffic) == 0 && len(aliveData) == 0 {
-		return nil
-	}
-
+	// 面板以 /report 刷新节点心跳，无流量无在线时也要发空包，否则空闲节点 5 分钟后显示离线
 	c.sendDeviceReport(aliveData)
 
 	reportErr := c.apiClient.Report(ctx, userTraffic, aliveData)
