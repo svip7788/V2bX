@@ -1,13 +1,6 @@
 {
     "servers": [
-        "localhost",
-        "https://1.1.1.1/dns-query",
-        "tcp-tls://1.1.1.1",
-        "tcp://1.1.1.1",
-        "1.1.1.1",
-        "https://8.8.8.8/dns-query",
-        "tcp://8.8.8.8",
-        "8.8.8.8"
+        "localhost"
     ],
     "queryStrategy": "UseIPv4",
     "tag": "dns_inbound"

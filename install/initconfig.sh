@@ -425,14 +425,7 @@ EOF
     cat <<EOF > /etc/V2bX/dns.json
 {
     "servers": [
-        "localhost",
-        "https://1.1.1.1/dns-query",
-        "tcp-tls://1.1.1.1",
-        "tcp://1.1.1.1",
-        "1.1.1.1",
-        "https://8.8.8.8/dns-query",
-        "tcp://8.8.8.8",
-        "8.8.8.8"
+        "localhost"
     ],
     "queryStrategy": "$xray_query_strategy",
     "tag": "dns_inbound"
@@ -444,8 +437,8 @@ EOF
   "dns": {
     "servers": [
       {
-        "tag": "cf",
-        "address": "1.1.1.1"
+        "tag": "local",
+        "type": "local"
       }
     ],
     "strategy": "$dnsstrategy"
@@ -455,7 +448,7 @@ EOF
       "tag": "direct",
       "type": "direct",
       "domain_resolver": {
-        "server": "cf",
+        "server": "local",
         "strategy": "$dnsstrategy"
       }
     },

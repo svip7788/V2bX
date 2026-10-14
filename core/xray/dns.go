@@ -24,11 +24,7 @@ func updateDNSConfig(node *panel.NodeInfo) (err error) {
 		err = saveDnsConfig(prettyJSON.Bytes(), dnsPath)
 	} else if len(node.RawDNS.DNSMap) != 0 {
 		dnsConfig := DNSConfig{
-			Servers: []interface{}{
-				"https://dns.google/dns-query",
-				"tcp-tls://8.8.8.8",
-				"8.8.8.8",
-				"localhost"},
+			Servers: []interface{}{"localhost"},
 			Tag: "dns_inbound",
 		}
 		for _, value := range node.RawDNS.DNSMap {

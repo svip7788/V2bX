@@ -80,7 +80,7 @@ func New(c *conf.CoreConfig) (vCore.Core, error) {
 			llog.WithField("err", err).Warn("Failed to build default DNS for sing-box, using empty DNS")
 		} else {
 			options.DNS = defaultDNS
-			llog.Info("No custom DNS configured for sing-box, using built-in defaults (DoH + DoT + UDP)")
+			llog.Info("No custom DNS configured for sing-box, using system resolver")
 		}
 	}
 	os.Setenv("SING_DNS_PATH", "")
@@ -136,12 +136,9 @@ func defaultSingDNS(ctx context.Context) (*option.DNSOptions, error) {
 	defaultJSON := []byte(`{
 		"dns": {
 			"servers": [
-				{"tag": "google-doh",  "type": "https",  "server": "dns.google", "server_port": 443, "path": "/dns-query", "domain_resolver": "google-udp"},
-				{"tag": "google-dot",  "type": "tls",    "server": "dns.google", "server_port": 853, "domain_resolver": "google-udp"},
-				{"tag": "google-udp",  "type": "udp",    "server": "8.8.8.8",   "server_port": 53},
-				{"tag": "google-tcp",  "type": "tcp",    "server": "8.8.8.8",   "server_port": 53}
+				{"tag": "local", "type": "local"}
 			],
-			"final": "google-doh"
+			"final": "local"
 		}
 	}`)
 	opts, err := json.UnmarshalExtendedContext[option.Options](ctx, defaultJSON)

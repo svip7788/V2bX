@@ -106,7 +106,7 @@ func getCore(c *conf.XrayConfig) *core.Instance {
 	}
 	if len(coreDnsConfig.Servers) == 0 {
 		coreDnsConfig.Servers = defaultDNSServers()
-		log.Info("No custom DNS configured, using built-in defaults (local + public upstreams)")
+		log.Info("No custom DNS configured, using system resolver")
 	}
 	if coreDnsConfig.QueryStrategy == "" && !hasPublicIPv6() {
 		coreDnsConfig.QueryStrategy = "UseIPv4"
@@ -247,13 +247,6 @@ func (c *Xray) Type() string {
 func defaultDNSServers() []*coreConf.NameServerConfig {
 	addresses := []string{
 		"localhost",
-		"https://1.1.1.1/dns-query",
-		"tcp-tls://1.1.1.1",
-		"tcp://1.1.1.1",
-		"1.1.1.1",
-		"https://8.8.8.8/dns-query",
-		"tcp://8.8.8.8",
-		"8.8.8.8",
 	}
 	servers := make([]*coreConf.NameServerConfig, 0, len(addresses))
 	for _, addr := range addresses {
