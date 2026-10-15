@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/InazumaV/V2bX/common/counter"
+	"github.com/InazumaV/V2bX/common/probe"
 	"github.com/InazumaV/V2bX/common/rate"
 	"github.com/InazumaV/V2bX/limiter"
 
@@ -92,6 +93,14 @@ func (r *cachedReader) ReadMultiBufferTimeout(timeout time.Duration) (buf.MultiB
 	}
 
 	return r.reader.ReadMultiBufferTimeout(timeout)
+}
+
+func (r *cachedReader) peek(b *buf.Buffer) {
+	r.Lock()
+	b.Clear()
+	n := r.cache.Copy(b.Extend(min(r.cache.Len(), b.Cap())))
+	b.Resize(0, int32(n))
+	r.Unlock()
 }
 
 func (r *cachedReader) Interrupt() {
@@ -539,6 +548,10 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 		}
 	}
 
+	if destination.Network == net.Network_TCP && destination.Port == probe.Port && replyLatencyProbe(ctx, link, destination) {
+		return
+	}
+
 	var handler outbound.Handler
 
 	routingLink := routing_session.AsRoutingContext(ctx)
@@ -606,6 +619,42 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	}
 
 	handler.Dispatch(ctx, link)
+}
+
+// replyLatencyProbe 明文测速请求直接回 204，不再拨号出站；不匹配时已读数据留在 link.Reader 里继续转发
+func replyLatencyProbe(ctx context.Context, link *transport.Link, destination net.Destination) bool {
+	reader, ok := link.Reader.(buf.TimeoutReader)
+	if !ok {
+		return false
+	}
+	cReader, ok := reader.(*cachedReader)
+	if !ok {
+		cReader = &cachedReader{reader: reader}
+		link.Reader = cReader
+	}
+	payload := buf.New()
+	defer payload.Release()
+	cReader.peek(payload)
+	deadline := time.Now().Add(probe.PeekTimeout)
+	for !probe.RequestLineComplete(payload.Bytes()) && payload.Len() < payload.Cap() {
+		remaining := time.Until(deadline)
+		if remaining <= 0 || cReader.Cache(payload, remaining) != nil {
+			break
+		}
+	}
+	var host string
+	if destination.Address.Family().IsDomain() {
+		host = destination.Address.Domain()
+	}
+	response := probe.Match(host, payload.Bytes())
+	if response == nil {
+		return false
+	}
+	_ = link.Writer.WriteMultiBuffer(buf.MergeBytes(nil, response))
+	common.Close(link.Writer)
+	common.Interrupt(link.Reader)
+	errors.LogInfo(ctx, "reply latency probe for [", destination, "]")
+	return true
 }
 
 func (d *DefaultDispatcher) getOrCreateCounter(tag string) *counter.TrafficCounter {

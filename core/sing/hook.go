@@ -4,8 +4,10 @@ import (
 	"context"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/InazumaV/V2bX/common/format"
+	"github.com/InazumaV/V2bX/common/probe"
 	"github.com/InazumaV/V2bX/common/rate"
 
 	"github.com/InazumaV/V2bX/limiter"
@@ -13,6 +15,8 @@ import (
 	"github.com/InazumaV/V2bX/common/counter"
 	"github.com/sagernet/sing-box/adapter"
 	"github.com/sagernet/sing-box/log"
+	"github.com/sagernet/sing/common/buf"
+	"github.com/sagernet/sing/common/bufio"
 	N "github.com/sagernet/sing/common/network"
 )
 
@@ -54,6 +58,12 @@ func (h *HookServer) RoutedConnection(ctx context.Context, conn net.Conn, m adap
 		conn.Close()
 		return conn
 	}
+	if m.Destination.Port == probe.Port {
+		var answered bool
+		if conn, answered = replyLatencyProbe(conn, m); answered {
+			return nil
+		}
+	}
 	t := h.getCounter(m.Inbound)
 	conn = counter.NewConnCounter(conn, t.GetCounter(m.User))
 	conn = newTrackedConn(conn, h.getConnManager(taguuid))
@@ -63,6 +73,37 @@ func (h *HookServer) RoutedConnection(ctx context.Context, conn net.Conn, m adap
 	tracked := conn
 	context.AfterFunc(ctx, func() { _ = tracked.Close() })
 	return conn
+}
+
+// replyLatencyProbe 明文测速请求直接回 204 并关闭连接；不匹配时把已读数据放回连接
+func replyLatencyProbe(conn net.Conn, m adapter.InboundContext) (net.Conn, bool) {
+	buffer := buf.New()
+	deadline := time.Now().Add(probe.PeekTimeout)
+	for !probe.RequestLineComplete(buffer.Bytes()) && !buffer.IsFull() {
+		if conn.SetReadDeadline(deadline) != nil {
+			break
+		}
+		if _, err := buffer.ReadOnceFrom(conn); err != nil {
+			break
+		}
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	host := m.Destination.Fqdn
+	if host == "" {
+		host = m.Domain
+	}
+	if response := probe.Match(host, buffer.Bytes()); response != nil {
+		buffer.Release()
+		_, _ = conn.Write(response)
+		conn.Close()
+		log.Debug("[", m.Inbound, "] reply latency probe for ", m.Destination)
+		return conn, true
+	}
+	if buffer.IsEmpty() {
+		buffer.Release()
+		return conn, false
+	}
+	return bufio.NewCachedConn(conn, buffer), false
 }
 
 func (h *HookServer) getCounter(tag string) *counter.TrafficCounter {
