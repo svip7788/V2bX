@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -79,14 +81,33 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 	path := fmt.Sprintf("%s/releases/download/%s/V2bX-linux-%s.zip", p.Repo, p.Version, arch)
 	zipFile := filepath.Join(stage, "V2bX.zip")
 	downloaded := false
-	for _, mirror := range githubMirrors {
-		logf("下载: %s%s", mirror, path)
-		if err := download(r.m.ctx, mirror+path, zipFile); err != nil {
-			logf("失败: %v", err)
-			continue
+	try := func(url string, opt downloadOptions) bool {
+		logf("下载: %s", url)
+		opt.progress = func(done, total int64, speed float64) {
+			if total > 0 {
+				logf("已下载 %.1f/%.1f MB，%.0f KB/s", float64(done)/1e6, float64(total)/1e6, speed/1024)
+			} else {
+				logf("已下载 %.1f MB，%.0f KB/s", float64(done)/1e6, speed/1024)
+			}
 		}
-		downloaded = true
-		break
+		if err := download(r.m.ctx, url, zipFile, opt); err != nil {
+			logf("失败: %v", err)
+			return false
+		}
+		return true
+	}
+	for _, mirror := range githubMirrors {
+		if downloaded = try(mirror+path, downloadOptions{maxTime: 10 * time.Minute, minSpeed: 100 << 10}); downloaded {
+			break
+		}
+	}
+	if !downloaded {
+		logf("所有下载源均较慢，放宽限速重试")
+		for _, mirror := range githubMirrors[:2] {
+			if downloaded = try(mirror+path, downloadOptions{maxTime: 10 * time.Minute, minSpeed: 5 << 10}); downloaded {
+				break
+			}
+		}
 	}
 	if !downloaded {
 		return false, "", fmt.Errorf("所有下载源均失败")
@@ -146,7 +167,7 @@ func (r *commandRunner) refreshScript(repo, version string, logf func(string, ..
 	raw := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/install/V2bX.sh", repo, version)
 	tmp := scriptPath + ".new"
 	for _, url := range []string{raw, "https://ghfast.top/" + raw} {
-		if download(r.m.ctx, url, tmp) == nil && os.Chmod(tmp, 0755) == nil && os.Rename(tmp, scriptPath) == nil {
+		if download(r.m.ctx, url, tmp, downloadOptions{maxTime: time.Minute}) == nil && os.Chmod(tmp, 0755) == nil && os.Rename(tmp, scriptPath) == nil {
 			logf("管理脚本已同步")
 			return
 		}
@@ -155,8 +176,28 @@ func (r *commandRunner) refreshScript(repo, version string, logf func(string, ..
 	logf("管理脚本同步失败，可稍后执行 V2bX update_shell")
 }
 
-func download(ctx context.Context, url, dest string) error {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+type downloadOptions struct {
+	maxTime time.Duration
+	// 每个检测窗口内平均速度低于该值（B/s）时放弃，0 表示不检测
+	minSpeed int64
+	progress func(done, total int64, speed float64)
+}
+
+type countingWriter struct {
+	w io.Writer
+	n atomic.Int64
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	n, err := c.w.Write(p)
+	c.n.Add(int64(n))
+	return n, err
+}
+
+const downloadCheckInterval = 15 * time.Second
+
+func download(ctx context.Context, url, dest string, opt downloadOptions) error {
+	ctx, cancel := context.WithTimeout(ctx, opt.maxTime)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -174,9 +215,41 @@ func download(ctx context.Context, url, dest string) error {
 	if err != nil {
 		return err
 	}
-	n, err := io.Copy(f, resp.Body)
+	cw := &countingWriter{w: f}
+	var slow atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(downloadCheckInterval)
+		defer ticker.Stop()
+		var last int64
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				cur := cw.n.Load()
+				speed := float64(cur-last) / downloadCheckInterval.Seconds()
+				last = cur
+				if opt.progress != nil {
+					opt.progress(cur, resp.ContentLength, speed)
+				}
+				if opt.minSpeed > 0 && speed < float64(opt.minSpeed) {
+					slow.Store(true)
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	n, err := io.Copy(cw, resp.Body)
+	close(done)
 	if cerr := f.Close(); err == nil {
 		err = cerr
+	}
+	if err != nil && slow.Load() {
+		err = fmt.Errorf("速度低于 %d KB/s", opt.minSpeed>>10)
+	} else if err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		err = fmt.Errorf("超过 %s 未下载完成", opt.maxTime)
 	}
 	if err == nil && n == 0 {
 		err = fmt.Errorf("文件为空")
