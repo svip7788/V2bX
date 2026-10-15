@@ -212,8 +212,13 @@ func (m *Manager) pullLoop() {
 	}
 }
 
-func nodeKey(id int, nodeType string) string {
-	return fmt.Sprintf("%d|%s", id, nodeType)
+type desiredNode struct {
+	nodeType      string
+	proxyProtocol bool
+}
+
+func nodeKey(id int, d desiredNode) string {
+	return fmt.Sprintf("%d|%s|%t", id, d.nodeType, d.proxyProtocol)
 }
 
 // syncNodes nodes 为 nil 时从面板拉取
@@ -235,7 +240,7 @@ func (m *Manager) syncNodes(nodes []panel.MachineNode) {
 		}
 	}
 
-	desired := make(map[int]string, len(nodes))
+	desired := make(map[int]desiredNode, len(nodes))
 	for _, n := range nodes {
 		t := n.NodeType
 		if t == "" {
@@ -246,13 +251,13 @@ func (m *Manager) syncNodes(nodes []panel.MachineNode) {
 			log.WithFields(log.Fields{"node_id": n.ID, "type": t}).Warn("Unsupported node type, skipped")
 			continue
 		}
-		desired[n.ID] = nt
+		desired[n.ID] = desiredNode{nodeType: nt, proxyProtocol: n.ProxyProtocol}
 	}
 
 	m.mu.RLock()
 	var stale []int
 	for id, rn := range m.nodes {
-		if nt, ok := desired[id]; !ok || rn.key != nodeKey(id, nt) {
+		if d, ok := desired[id]; !ok || rn.key != nodeKey(id, d) {
 			stale = append(stale, id)
 		}
 	}
@@ -276,18 +281,22 @@ func (m *Manager) syncNodes(nodes []panel.MachineNode) {
 		}
 		if err := m.startNode(id, desired[id]); err != nil {
 			failed = true
-			log.WithFields(log.Fields{"node_id": id, "type": desired[id], "err": err}).
+			log.WithFields(log.Fields{"node_id": id, "type": desired[id].nodeType, "err": err}).
 				Error("Start node failed, will retry on next sync")
 		}
 	}
 	m.hasFailedNodes.Store(failed)
 }
 
-func (m *Manager) startNode(id int, nodeType string) error {
+func (m *Manager) startNode(id int, d desiredNode) error {
+	nodeType := d.nodeType
 	coreType := m.cfg.CoreTypeFor(nodeType, m.coreTypes)
 	nc, err := m.cfg.NodeConfig(id, nodeType, coreType)
 	if err != nil {
 		return err
+	}
+	if d.proxyProtocol && nc.Options.XrayOptions != nil {
+		nc.Options.XrayOptions.EnableProxyProtocol = true
 	}
 	api, err := panel.NewMachineNode(&nc.ApiConfig, m.cfg.MachineID)
 	if err != nil {
@@ -300,9 +309,9 @@ func (m *Manager) startNode(id int, nodeType string) error {
 		return err
 	}
 	m.mu.Lock()
-	m.nodes[id] = &runningNode{key: nodeKey(id, nodeType), ctrl: ctrl}
+	m.nodes[id] = &runningNode{key: nodeKey(id, d), ctrl: ctrl}
 	m.mu.Unlock()
-	log.WithFields(log.Fields{"node_id": id, "type": nodeType, "core": coreType}).Info("Node started")
+	log.WithFields(log.Fields{"node_id": id, "type": nodeType, "core": coreType, "proxy_protocol": d.proxyProtocol}).Info("Node started")
 	return nil
 }
 
@@ -444,7 +453,7 @@ func (m *Manager) runningNodeIDs() []string {
 	sort.Ints(ids)
 	out := make([]string, len(ids))
 	for i, id := range ids {
-		out[i] = fmt.Sprintf("%d(%s)", id, strings.SplitN(m.nodes[id].key, "|", 2)[1])
+		out[i] = fmt.Sprintf("%d(%s)", id, strings.Split(m.nodes[id].key, "|")[1])
 	}
 	return out
 }

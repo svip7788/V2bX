@@ -15,6 +15,8 @@ type MachineNode struct {
 	Type     string `json:"type"`
 	NodeType string `json:"node_type"`
 	Name     string `json:"name"`
+	// 节点入站接受 PROXY protocol，前置中转透传用户真实 IP
+	ProxyProtocol bool `json:"proxy_protocol"`
 }
 
 type MachineBaseConfig struct {
