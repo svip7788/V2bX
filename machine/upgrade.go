@@ -3,6 +3,8 @@ package machine
 import (
 	"archive/zip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,10 +27,19 @@ var (
 	versionPattern = regexp.MustCompile(`^[A-Za-z0-9_.+-]{1,64}$`)
 	githubMirrors  = []string{
 		"https://github.com/",
-		"https://ghfast.top/https://github.com/",
+		"https://edgeone.gh-proxy.com/https://github.com/",
+		"https://gh.idayer.com/https://github.com/",
+		"https://ghfile.geekertao.top/https://github.com/",
 		"https://gh-proxy.com/https://github.com/",
+		"https://gh.llkk.cc/https://github.com/",
+		"https://ghfast.top/https://github.com/",
 		"https://ghproxy.net/https://github.com/",
 	}
+	relaxedMirrors = []string{
+		"https://github.com/",
+		"https://gh-proxy.com/https://github.com/",
+	}
+	sha256Pattern = regexp.MustCompile(`(?m)^SHA2-256=\s*([0-9a-f]{64})`)
 )
 
 func releaseArch() (string, error) {
@@ -80,6 +91,10 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 
 	path := fmt.Sprintf("%s/releases/download/%s/V2bX-linux-%s.zip", p.Repo, p.Version, arch)
 	zipFile := filepath.Join(stage, "V2bX.zip")
+	expected := fetchSHA256(r.m.ctx, path+".dgst")
+	if expected == "" {
+		logf("未获取到 SHA256 校验值，仅校验压缩包完整性")
+	}
 	downloaded := false
 	try := func(url string, opt downloadOptions) bool {
 		logf("下载: %s", url)
@@ -94,6 +109,10 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 			logf("失败: %v", err)
 			return false
 		}
+		if err := verifyZip(zipFile, expected); err != nil {
+			logf("校验失败: %v", err)
+			return false
+		}
 		return true
 	}
 	for _, mirror := range githubMirrors {
@@ -103,7 +122,7 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 	}
 	if !downloaded {
 		logf("所有下载源均较慢，放宽限速重试")
-		for _, mirror := range githubMirrors[:2] {
+		for _, mirror := range relaxedMirrors {
 			if downloaded = try(mirror+path, downloadOptions{maxTime: 10 * time.Minute, minSpeed: 5 << 10}); downloaded {
 				break
 			}
@@ -255,6 +274,51 @@ func download(ctx context.Context, url, dest string, opt downloadOptions) error 
 		err = fmt.Errorf("文件为空")
 	}
 	return err
+}
+
+// fetchSHA256 按镜像顺序获取 release 的 .dgst（优先 GitHub 直连），失败返回空串
+func fetchSHA256(ctx context.Context, path string) string {
+	tmp, err := os.CreateTemp("", "v2bx-dgst-")
+	if err != nil {
+		return ""
+	}
+	tmp.Close()
+	defer os.Remove(tmp.Name())
+	for _, mirror := range githubMirrors {
+		if download(ctx, mirror+path, tmp.Name(), downloadOptions{maxTime: 20 * time.Second}) != nil {
+			continue
+		}
+		raw, _ := os.ReadFile(tmp.Name())
+		if m := sha256Pattern.FindSubmatch(raw); m != nil {
+			return string(m[1])
+		}
+	}
+	return ""
+}
+
+// verifyZip 镜像可能返回网页或被篡改
+func verifyZip(file, expected string) error {
+	zr, err := zip.OpenReader(file)
+	if err != nil {
+		return fmt.Errorf("不是有效的压缩包: %w", err)
+	}
+	zr.Close()
+	if expected == "" {
+		return nil
+	}
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	if got := hex.EncodeToString(h.Sum(nil)); got != expected {
+		return fmt.Errorf("SHA256 不一致")
+	}
+	return nil
 }
 
 func unzip(src, dest string) error {
