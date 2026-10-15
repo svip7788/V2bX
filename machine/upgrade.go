@@ -40,6 +40,7 @@ var (
 		"https://gh-proxy.com/https://github.com/",
 	}
 	sha256Pattern = regexp.MustCompile(`(?m)^SHA2-256=\s*([0-9a-f]{64})`)
+	sha256Hex     = regexp.MustCompile(`^[0-9a-f]{64}$`)
 )
 
 func releaseArch() (string, error) {
@@ -89,11 +90,12 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 	}
 	defer os.RemoveAll(stage)
 
-	path := fmt.Sprintf("%s/releases/download/%s/V2bX-linux-%s.zip", p.Repo, p.Version, arch)
+	asset := fmt.Sprintf("V2bX-linux-%s.zip", arch)
+	path := fmt.Sprintf("%s/releases/download/%s/%s", p.Repo, p.Version, asset)
 	zipFile := filepath.Join(stage, "V2bX.zip")
-	expected := fetchSHA256(r.m.ctx, path+".dgst")
+	expected := fetchSHA256(r.m.ctx, p.Repo, p.Version, asset)
 	if expected == "" {
-		logf("未获取到 SHA256 校验值，仅校验压缩包完整性")
+		logf("未能从 GitHub 获取 SHA256，仅校验压缩包完整性（无法防止镜像篡改）")
 	}
 	downloaded := false
 	try := func(url string, opt downloadOptions) bool {
@@ -123,7 +125,7 @@ func (r *commandRunner) upgrade(cmd command) (bool, string, error) {
 	if !downloaded {
 		logf("所有下载源均较慢，放宽限速重试")
 		for _, mirror := range relaxedMirrors {
-			if downloaded = try(mirror+path, downloadOptions{maxTime: 10 * time.Minute, minSpeed: 5 << 10}); downloaded {
+			if downloaded = try(mirror+path, downloadOptions{maxTime: 30 * time.Minute, minSpeed: 20 << 10}); downloaded {
 				break
 			}
 		}
@@ -197,7 +199,7 @@ func (r *commandRunner) refreshScript(repo, version string, logf func(string, ..
 
 type downloadOptions struct {
 	maxTime time.Duration
-	// 每个检测窗口内平均速度低于该值（B/s）时放弃，0 表示不检测
+	// 连续两个检测窗口平均速度低于该值（B/s）时放弃，0 表示不检测
 	minSpeed int64
 	progress func(done, total int64, speed float64)
 }
@@ -241,6 +243,7 @@ func download(ctx context.Context, url, dest string, opt downloadOptions) error 
 		ticker := time.NewTicker(downloadCheckInterval)
 		defer ticker.Stop()
 		var last int64
+		var slowWindows int
 		for {
 			select {
 			case <-done:
@@ -252,7 +255,9 @@ func download(ctx context.Context, url, dest string, opt downloadOptions) error 
 				if opt.progress != nil {
 					opt.progress(cur, resp.ContentLength, speed)
 				}
-				if opt.minSpeed > 0 && speed < float64(opt.minSpeed) {
+				if opt.minSpeed <= 0 || speed >= float64(opt.minSpeed) {
+					slowWindows = 0
+				} else if slowWindows++; slowWindows >= 2 {
 					slow.Store(true)
 					cancel()
 					return
@@ -276,21 +281,39 @@ func download(ctx context.Context, url, dest string, opt downloadOptions) error 
 	return err
 }
 
-// fetchSHA256 按镜像顺序获取 release 的 .dgst（优先 GitHub 直连），失败返回空串
-func fetchSHA256(ctx context.Context, path string) string {
+// fetchSHA256 只从 GitHub 获取校验值：镜像可同时篡改压缩包和 .dgst，其返回的校验值不可信。失败返回空串
+func fetchSHA256(ctx context.Context, repo, version, asset string) string {
 	tmp, err := os.CreateTemp("", "v2bx-dgst-")
 	if err != nil {
 		return ""
 	}
 	tmp.Close()
 	defer os.Remove(tmp.Name())
-	for _, mirror := range githubMirrors {
-		if download(ctx, mirror+path, tmp.Name(), downloadOptions{maxTime: 20 * time.Second}) != nil {
-			continue
-		}
+	opt := downloadOptions{maxTime: 20 * time.Second}
+
+	dgst := fmt.Sprintf("https://github.com/%s/releases/download/%s/%s.dgst", repo, version, asset)
+	if download(ctx, dgst, tmp.Name(), opt) == nil {
 		raw, _ := os.ReadFile(tmp.Name())
 		if m := sha256Pattern.FindSubmatch(raw); m != nil {
 			return string(m[1])
+		}
+	}
+
+	api := fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", repo, version)
+	if download(ctx, api, tmp.Name(), opt) == nil {
+		raw, _ := os.ReadFile(tmp.Name())
+		var release struct {
+			Assets []struct {
+				Name   string `json:"name"`
+				Digest string `json:"digest"`
+			} `json:"assets"`
+		}
+		if json.Unmarshal(raw, &release) == nil {
+			for _, a := range release.Assets {
+				if d := strings.TrimPrefix(a.Digest, "sha256:"); a.Name == asset && sha256Hex.MatchString(d) {
+					return d
+				}
+			}
 		}
 	}
 	return ""
