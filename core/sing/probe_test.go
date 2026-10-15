@@ -1,34 +1,40 @@
 package sing
 
 import (
+	"bufio"
 	"io"
 	"net"
-	"strings"
+	"net/http"
 	"testing"
 
 	"github.com/sagernet/sing-box/adapter"
 	M "github.com/sagernet/sing/common/metadata"
 )
 
-func TestReplyLatencyProbe(t *testing.T) {
+func TestReplyLatencyProbeKeepAlive(t *testing.T) {
 	client, server := net.Pipe()
-	defer client.Close()
-	go client.Write([]byte("GET /generate_204 HTTP/1.1\r\nHost: www.gstatic.com\r\n\r\n"))
 	m := adapter.InboundContext{Destination: M.ParseSocksaddrHostPort("www.gstatic.com", 80)}
 	result := make(chan bool, 1)
 	go func() {
 		_, answered := replyLatencyProbe(server, m)
 		result <- answered
 	}()
-	resp, err := io.ReadAll(client)
-	if err != nil {
-		t.Fatal(err)
+	reader := bufio.NewReader(client)
+	for i := 0; i < 2; i++ {
+		req, _ := http.NewRequest(http.MethodGet, "http://www.gstatic.com/generate_204", nil)
+		go req.Write(client)
+		resp, err := http.ReadResponse(reader, req)
+		if err != nil {
+			t.Fatalf("request %d: %v", i, err)
+		}
+		if resp.StatusCode != http.StatusNoContent || resp.Close {
+			t.Fatalf("request %d: status %d close %v", i, resp.StatusCode, resp.Close)
+		}
+		resp.Body.Close()
 	}
+	client.Close()
 	if !<-result {
 		t.Fatal("expected probe to be answered")
-	}
-	if !strings.HasPrefix(string(resp), "HTTP/1.1 204 ") {
-		t.Fatalf("unexpected response %q", resp)
 	}
 }
 

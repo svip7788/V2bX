@@ -11,30 +11,41 @@ import (
 	"github.com/xtls/xray-core/transport/pipe"
 )
 
-func newProbeLink(t *testing.T, payload string) (*transport.Link, *pipe.Reader) {
+func newProbeLink(t *testing.T, payloads ...string) (*transport.Link, *pipe.Reader) {
 	t.Helper()
 	upR, upW := pipe.New()
 	downR, downW := pipe.New()
-	b := buf.New()
-	b.WriteString(payload)
-	if err := upW.WriteMultiBuffer(buf.MultiBuffer{b}); err != nil {
-		t.Fatal(err)
+	for _, p := range payloads {
+		if err := upW.WriteMultiBuffer(buf.MergeBytes(nil, []byte(p))); err != nil {
+			t.Fatal(err)
+		}
 	}
+	upW.Close()
 	return &transport.Link{Reader: upR, Writer: downW}, downR
 }
 
-func TestReplyLatencyProbe(t *testing.T) {
+func readAll(t *testing.T, r *pipe.Reader) string {
+	t.Helper()
+	var sb strings.Builder
+	for {
+		mb, err := r.ReadMultiBuffer()
+		sb.WriteString(mb.String())
+		buf.ReleaseMulti(mb)
+		if err != nil {
+			return sb.String()
+		}
+	}
+}
+
+func TestReplyLatencyProbeKeepAlive(t *testing.T) {
+	const req = "GET /generate_204 HTTP/1.1\r\nHost: www.gstatic.com\r\n\r\n"
 	dest := net.TCPDestination(net.DomainAddress("www.gstatic.com"), 80)
-	link, down := newProbeLink(t, "GET /generate_204 HTTP/1.1\r\nHost: www.gstatic.com\r\n\r\n")
+	link, down := newProbeLink(t, req, req)
 	if !replyLatencyProbe(context.Background(), link, dest) {
 		t.Fatal("expected probe to be answered")
 	}
-	mb, err := down.ReadMultiBuffer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := mb.String(); !strings.HasPrefix(got, "HTTP/1.1 204 ") {
-		t.Fatalf("unexpected response %q", got)
+	if got := strings.Count(readAll(t, down), "HTTP/1.1 204 "); got != 2 {
+		t.Fatalf("got %d responses, want 2", got)
 	}
 }
 

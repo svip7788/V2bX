@@ -621,7 +621,14 @@ func (d *DefaultDispatcher) routedDispatch(ctx context.Context, link *transport.
 	handler.Dispatch(ctx, link)
 }
 
-// replyLatencyProbe 明文测速请求直接回 204，不再拨号出站；不匹配时已读数据留在 link.Reader 里继续转发
+func multiBufferBytes(mb buf.MultiBuffer) []byte {
+	b := make([]byte, mb.Len())
+	mb.Copy(b)
+	buf.ReleaseMulti(mb)
+	return b
+}
+
+// replyLatencyProbe 明文测速请求由节点直接应答（keep-alive），不再拨号出站；不匹配时已读数据留在 link.Reader 里继续转发
 func replyLatencyProbe(ctx context.Context, link *transport.Link, destination net.Destination) bool {
 	reader, ok := link.Reader.(buf.TimeoutReader)
 	if !ok {
@@ -646,11 +653,15 @@ func replyLatencyProbe(ctx context.Context, link *transport.Link, destination ne
 	if destination.Address.Family().IsDomain() {
 		host = destination.Address.Domain()
 	}
-	response := probe.Match(host, payload.Bytes())
-	if response == nil {
+	if probe.Match(host, payload.Bytes()) == nil {
 		return false
 	}
-	_ = link.Writer.WriteMultiBuffer(buf.MergeBytes(nil, response))
+	probe.Serve(host, multiBufferBytes(cReader.readInternal()), func(timeout time.Duration) ([]byte, error) {
+		mb, err := cReader.ReadMultiBufferTimeout(timeout)
+		return multiBufferBytes(mb), err
+	}, func(b []byte) error {
+		return link.Writer.WriteMultiBuffer(buf.MergeBytes(nil, b))
+	})
 	common.Close(link.Writer)
 	common.Interrupt(link.Reader)
 	errors.LogInfo(ctx, "reply latency probe for [", destination, "]")

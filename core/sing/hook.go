@@ -75,7 +75,7 @@ func (h *HookServer) RoutedConnection(ctx context.Context, conn net.Conn, m adap
 	return conn
 }
 
-// replyLatencyProbe 明文测速请求直接回 204 并关闭连接；不匹配时把已读数据放回连接
+// replyLatencyProbe 明文测速请求由节点直接应答（keep-alive），结束后关闭连接；不匹配时把已读数据放回连接
 func replyLatencyProbe(conn net.Conn, m adapter.InboundContext) (net.Conn, bool) {
 	buffer := buf.New()
 	deadline := time.Now().Add(probe.PeekTimeout)
@@ -92,9 +92,20 @@ func replyLatencyProbe(conn net.Conn, m adapter.InboundContext) (net.Conn, bool)
 	if host == "" {
 		host = m.Domain
 	}
-	if response := probe.Match(host, buffer.Bytes()); response != nil {
+	if probe.Match(host, buffer.Bytes()) != nil {
+		data := append([]byte(nil), buffer.Bytes()...)
 		buffer.Release()
-		_, _ = conn.Write(response)
+		readBuf := make([]byte, 4096)
+		probe.Serve(host, data, func(timeout time.Duration) ([]byte, error) {
+			if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+				return nil, err
+			}
+			n, err := conn.Read(readBuf)
+			return readBuf[:n], err
+		}, func(b []byte) error {
+			_, err := conn.Write(b)
+			return err
+		})
 		conn.Close()
 		log.Debug("[", m.Inbound, "] reply latency probe for ", m.Destination)
 		return conn, true

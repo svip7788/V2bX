@@ -1,8 +1,10 @@
 package probe
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestMatch(t *testing.T) {
@@ -39,9 +41,45 @@ func TestMatch(t *testing.T) {
 	}
 }
 
+func TestServeKeepAlive(t *testing.T) {
+	const req = "GET /generate_204 HTTP/1.1\r\nHost: www.gstatic.com\r\n\r\n"
+	// 首个请求头部缺结尾、第二个测速请求分片到达、第三个是非测速请求
+	reads := [][]byte{[]byte("\r\n"), []byte(req[:10]), []byte(req[10:]), []byte("GET / HTTP/1.1\r\nHost: www.gstatic.com\r\n\r\n"), []byte(req)}
+	var responses int
+	Serve("www.gstatic.com", []byte(req[:len(req)-2]),
+		func(time.Duration) ([]byte, error) {
+			if len(reads) == 0 {
+				return nil, io.EOF
+			}
+			b := reads[0]
+			reads = reads[1:]
+			return b, nil
+		},
+		func(b []byte) error {
+			responses++
+			return nil
+		})
+	if responses != 2 {
+		t.Fatalf("responses = %d, want 2", responses)
+	}
+}
+
+func TestServeStopsOnEmptyRead(t *testing.T) {
+	var reads int
+	Serve("www.gstatic.com", []byte("GET /generate_204 HTTP/1.1\r\n\r\n"),
+		func(time.Duration) ([]byte, error) {
+			reads++
+			return nil, nil
+		},
+		func([]byte) error { return nil })
+	if reads != 1 {
+		t.Fatalf("reads = %d, want 1", reads)
+	}
+}
+
 func TestMatchHeadOmitsBody(t *testing.T) {
 	resp := string(Match("detectportal.firefox.com", []byte("HEAD /success.txt HTTP/1.1\r\n")))
-	if !strings.HasSuffix(resp, "Content-Length: 8\r\nConnection: close\r\n\r\n") {
+	if !strings.HasSuffix(resp, "Content-Length: 8\r\n\r\n") {
 		t.Fatalf("unexpected HEAD response %q", resp)
 	}
 	resp = string(Match("detectportal.firefox.com", []byte("GET /success.txt HTTP/1.1\r\n")))
