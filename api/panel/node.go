@@ -170,6 +170,12 @@ type Rules struct {
 	Protocol []string
 }
 
+// ResetNodeInfoCache 让下次 GetNodeInfo 必定返回完整配置
+func (c *Client) ResetNodeInfoCache() {
+	c.nodeEtag = ""
+	c.responseBodyHash = ""
+}
+
 func (c *Client) GetNodeInfo(ctx context.Context) (node *NodeInfo, err error) {
 	path := c.apiPath("/api/v1/server/UniProxy/config")
 	r, err := c.client.

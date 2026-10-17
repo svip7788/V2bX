@@ -39,9 +39,11 @@ type Controller struct {
 	machineEvents             chan panel.WSEvent
 	machineEventsDropped      atomic.Bool
 	configReloadPending       atomic.Bool
-	runtimeMu                 sync.Mutex
-	ctx                       context.Context
-	cancel                    context.CancelFunc
+	// 重载时已删掉旧入站但未成功加回，需按拉取间隔重试，不能依赖配置是否变化
+	reloadFailed atomic.Bool
+	runtimeMu    sync.Mutex
+	ctx          context.Context
+	cancel       context.CancelFunc
 	*conf.Options
 }
 

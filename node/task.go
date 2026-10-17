@@ -61,7 +61,7 @@ func (c *Controller) startTasks(node *panel.NodeInfo) {
 }
 
 func (c *Controller) periodicNodeInfoMonitor() error {
-	if c.isWebSocketConnected() {
+	if c.isWebSocketConnected() && !c.reloadFailed.Load() {
 		return nil
 	}
 	return c.nodeInfoMonitor()
@@ -76,6 +76,10 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		return nil
 	}
 
+	retrying := c.reloadFailed.Load()
+	if retrying {
+		c.apiClient.ResetNodeInfoCache()
+	}
 	// get node info
 	newN, err := c.apiClient.GetNodeInfo(ctx)
 	if err != nil {
@@ -125,13 +129,15 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 		// Remove old node
 		log.WithField("tag", c.tag).Info("Node changed, reload")
 		err = c.server.DelNode(c.tag)
-		if err != nil {
+		if err != nil && !retrying {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Panic("Delete node failed")
+			}).Error("Delete node failed, will retry")
+			c.reloadFailed.Store(true)
 			return nil
 		}
+		c.reloadFailed.Store(true)
 
 		// Update limiter
 		if len(c.Options.Name) == 0 {
@@ -183,7 +189,7 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 			log.WithFields(log.Fields{
 				"tag": c.tag,
 				"err": err,
-			}).Panic("Add node failed")
+			}).Error("Add node failed, will retry")
 			return nil
 		}
 		if len(c.userList) > 0 {
@@ -196,10 +202,11 @@ func (c *Controller) nodeInfoMonitor() (err error) {
 				log.WithFields(log.Fields{
 					"tag": c.tag,
 					"err": err,
-				}).Error("Add users failed")
+				}).Error("Add users failed, will retry")
 				return nil
 			}
 		}
+		c.reloadFailed.Store(false)
 		// Check interval
 		if c.nodeInfoMonitorPeriodic.Interval != newN.PullInterval &&
 			newN.PullInterval != 0 {
